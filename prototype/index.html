@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'" />
+    <title>Ombrique canvas prototype</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #101014;
+      }
+      #cv {
+        position: fixed;
+        inset: 0;
+        width: 100vw;
+        height: 100vh;
+        display: block;
+      }
+      #hud {
+        position: fixed;
+        left: 16px;
+        top: 16px;
+        z-index: 10;
+        pointer-events: none;
+        font: 12.5px/1.55 ui-monospace, monospace;
+        color: #e8e8f0;
+        background: rgb(16 16 20 / 78%);
+        border: 1px solid rgb(255 255 255 / 16%);
+        border-radius: 8px;
+        padding: 10px 14px;
+        white-space: pre;
+      }
+      .board {
+        position: absolute;
+        box-sizing: border-box;
+        width: 720px;
+        height: 540px;
+        padding: 24px;
+        border-radius: 12px;
+        background: #fdfdfb;
+        box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
+        color: #17171c;
+        font-family: system-ui, sans-serif;
+      }
+      .board header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .board h2 {
+        margin: 0;
+        font-size: 28px;
+        font-weight: 700;
+        letter-spacing: -0.5px;
+        background: #fff;
+      }
+      .badge {
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: var(--accent);
+        color: #fff;
+        font: 600 13px system-ui, sans-serif;
+      }
+      .line {
+        margin: 10px 0 0;
+        overflow: hidden;
+        color: #4a4a55;
+        font-size: 15px;
+        line-height: 1.5;
+        white-space: nowrap;
+      }
+      .bar {
+        height: 10px;
+        margin-top: 16px;
+        border-radius: 5px;
+        background: linear-gradient(90deg, var(--accent), #17171c);
+      }
+      .cards {
+        display: flex;
+        gap: 16px;
+        margin-top: 20px;
+      }
+      .card {
+        display: flex;
+        box-sizing: border-box;
+        width: 200px;
+        height: var(--h);
+        align-items: flex-end;
+        padding: 10px;
+        border: 1px solid #e2e4ea;
+        border-radius: 10px;
+        background: linear-gradient(160deg, #ffffff, #eceef2);
+        box-shadow: 0 2px 6px rgb(0 0 0 / 8%);
+        color: #565664;
+        font: 500 13px system-ui, sans-serif;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="cv" content="drawable"></canvas>
+    <div id="hud"><span id="hudText">starting…</span></div>
+    <script src="renderer.js"></script>
+  </body>
+</html>

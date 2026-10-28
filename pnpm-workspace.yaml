@@ -1,0 +1,11 @@
+packages:
+  - apps/*
+  - packages/*
+  - prototype
+
+minimumReleaseAgeExclude:
+  - electron
+  - electron-vite
+
+onlyBuiltDependencies:
+  - electron

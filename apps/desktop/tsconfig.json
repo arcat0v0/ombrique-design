@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "paths": {
+      "@ombrique/*": ["../../packages/*/src/index.ts"]
+    }
+  },
+  "include": ["src", "electron.vite.config.ts"]
+}

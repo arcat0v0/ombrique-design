@@ -1,0 +1,15 @@
+{
+  "name": "ombrique-canvas-proto",
+  "private": true,
+  "version": "0.0.0",
+  "main": "main.js",
+  "scripts": {
+    "probe": "PROTO_MODE=probe electron .",
+    "test": "PROTO_MODE=test electron .",
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.3.10",
+    "electron": "45.1.0"
+  }
+}
