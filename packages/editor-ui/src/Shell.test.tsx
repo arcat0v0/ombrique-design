@@ -115,6 +115,11 @@ describe("Shell", () => {
     expect(redo).toHaveBeenCalledTimes(1);
 
     window.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "y", ctrlKey: true }),
+    );
+    expect(redo).toHaveBeenCalledTimes(2);
+
+    window.dispatchEvent(
       new KeyboardEvent("keydown", { key: "d", ctrlKey: true }),
     );
     expect(duplicateSelection).toHaveBeenCalledTimes(1);

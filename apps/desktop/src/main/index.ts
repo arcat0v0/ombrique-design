@@ -3,6 +3,7 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
+  Menu,
   protocol,
   utilityProcess,
   WebContentsView,
@@ -10,11 +11,14 @@ import {
 } from "electron";
 import {
   copyFileSync,
+  cpSync,
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import { basename, join, normalize, resolve, sep } from "node:path";
 import { mimeFor, urlToProjectPath } from "@ombrique/compiler";
 import { createBundle, extractBundle } from "@ombrique/doc-service";
@@ -317,20 +321,72 @@ function createShellWindow() {
       nodeIntegration: false,
     },
   });
+  if (process.platform !== "darwin") Menu.setApplicationMenu(null);
+  createShellWindowContents();
+}
 
+ipcMain.on("ombrique:windowControl", (_event, action: string) => {
+  const win = BrowserWindow.fromWebContents(_event.sender) ?? shellWindow;
+  if (!win) return;
+  switch (action) {
+    case "minimize":
+      win.minimize();
+      break;
+    case "toggleMaximize":
+      if (win.isMaximized()) win.unmaximize();
+      else win.maximize();
+      break;
+    case "close":
+      win.close();
+      break;
+    case "toggleFullscreen":
+      win.setFullScreen(!win.isFullScreen());
+      break;
+    case "toggleDevtools":
+      win.webContents.toggleDevTools();
+      break;
+    case "reloadRenderer":
+      win.webContents.reload();
+      break;
+  }
+});
+
+if (process.platform === "darwin") {
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate([{ role: "appMenu" }, { role: "editMenu" }]),
+  );
+} else {
+  Menu.setApplicationMenu(null);
+}
+
+function createShellWindowContents() {
+  const win = shellWindow;
+  if (!win) return;
   canvasView = createCanvasView();
-  shellWindow.contentView.addChildView(canvasView);
+  win.contentView.addChildView(canvasView);
   layoutCanvas();
   void canvasView.webContents.loadURL("ombrique://app/");
 
   if (process.env.ELECTRON_RENDERER_URL) {
-    void shellWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
+    void win.loadURL(process.env.ELECTRON_RENDERER_URL);
   } else {
-    void shellWindow.loadFile(join(rendererDir, "index.html"));
+    void win.loadFile(join(rendererDir, "index.html"));
   }
 
-  shellWindow.on("resize", layoutCanvas);
-  shellWindow.on("closed", () => {
+  win.on("resize", layoutCanvas);
+  win.webContents.on("before-input-event", (event, input) => {
+    if (input.type !== "keyDown") return;
+    if (input.key === "F11") {
+      event.preventDefault();
+      win.setFullScreen(!win.isFullScreen());
+      return;
+    }
+    if (input.key === "F12") {
+      event.preventDefault();
+      win.webContents.toggleDevTools();
+    }
+  });
+  win.on("closed", () => {
     canvasView = null;
     shellWindow = null;
   });
@@ -476,6 +532,14 @@ ipcMain.on(
 ipcMain.on(
   "ombrique:fromCanvas",
   (_event, payload: { channel: string; payload: unknown }) => {
+    if (payload.channel === "ombrique:toolChanged") {
+      const tool = (payload.payload as { tool?: string } | null)?.tool;
+      shellWindow?.webContents.send(
+        "ombrique:fromShellTool",
+        tool === "hand" ? "hand" : "select",
+      );
+      return;
+    }
     shellWindow?.webContents.send(payload.channel, payload.payload);
   },
 );
@@ -733,9 +797,11 @@ if (process.env.OMBRIQUE_E2E) {
     new Promise((resolve) => setTimeout(resolve, ms));
   app.whenReady().then(async () => {
     await wait(1500);
+    const e2eExample = mkdtempSync(join(tmpdir(), "ombrique-e2e-example-"));
+    cpSync(exampleProjectRoot(), e2eExample, { recursive: true });
     ensureDocHost().send({
       type: "shell",
-      message: { kind: "openProject", path: exampleProjectRoot() },
+      message: { kind: "openProject", path: e2eExample },
     });
     const logs: string[] = [];
     shellWindow?.webContents.on("console-message", (event) =>
@@ -2124,6 +2190,9 @@ export default function Home() {
       } = await import("node:fs");
       const { tmpdir } = await import("node:os");
 
+      const menuNull =
+        process.platform === "darwin" || Menu.getApplicationMenu() === null;
+
       // Setup clean isolated temp project for UI editing tests
       const uiProj = mkdtempSync(join(tmpdir(), "ombrique-ui-e2e-"));
       mkdirSync(join(uiProj, "pages"), { recursive: true });
@@ -2153,6 +2222,15 @@ export default function Home() {
 `;
       writeFileSync(join(uiProj, "pages/home.tsx"), initialHome, "utf8");
 
+      const canvasErrors: string[] = [];
+      const onCanvasError = (
+        details: Electron.Event<Electron.WebContentsConsoleMessageEventParams>,
+      ) => {
+        if (details.level === "error" && details.message.includes("Uncaught"))
+          canvasErrors.push(details.message);
+      };
+      canvasView?.webContents.on("console-message", onCanvasError);
+
       ensureDocHost().send({
         type: "shell",
         message: { kind: "openProject", path: uiProj },
@@ -2160,7 +2238,7 @@ export default function Home() {
       await wait(2500);
 
       if (shellWindow && canvasView) {
-        // 1. Click layer row "Design in code" and assert properties panel appears with right values
+        log("application menu removed on linux", menuNull === true);
         const clickResult = await shellWindow.webContents
           .executeJavaScript(`
           (async () => {
@@ -2255,18 +2333,109 @@ export default function Home() {
           })()
         `)
           .catch((e) => ({ ok: false, error: String(e) }));
-        await wait(2000);
-
-        const homeAfterUndo = readFileSync(
+        let homeAfterUndo = readFileSync(
           join(uiProj, "pages/home.tsx"),
           "utf8",
         );
+        const undoRestored = (source: string) =>
+          source.includes("x={96}") ||
+          source.includes("x={ 96 }") ||
+          source.includes("left: 96");
+        for (let attempt = 0; attempt < 16; attempt += 1) {
+          if (undoRestored(homeAfterUndo)) break;
+          await wait(500);
+          homeAfterUndo = readFileSync(join(uiProj, "pages/home.tsx"), "utf8");
+        }
+        const undoPassed =
+          undoResult?.ok === true && undoRestored(homeAfterUndo);
+        log("UI undo button restores source x", undoPassed);
+        if (!undoPassed) {
+          const notice = await shellWindow.webContents
+            .executeJavaScript(
+              `document.querySelector("footer")?.textContent ?? document.body.innerText.slice(-300)`,
+            )
+            .catch(() => "notice unavailable");
+          logs.push(
+            `[ui-e2e] undo diagnostics ${JSON.stringify(undoResult)} notice=${JSON.stringify(notice)} source=${JSON.stringify(homeAfterUndo)}`,
+          );
+        }
+
+        // Ctrl+D duplicates the selected Text node with real content
+        const dupResult = await shellWindow.webContents
+          .executeJavaScript(`
+          (async () => {
+            const rows = Array.from(document.querySelectorAll(".layer-row"));
+            const target = rows.find(r => r.textContent?.includes("Design in code"));
+            if (!target) return { ok: false, reason: "row missing" };
+            target.click();
+            await new Promise(r => setTimeout(r, 600));
+            window.dispatchEvent(new KeyboardEvent("keydown", { key: "d", ctrlKey: true, bubbles: true }));
+            await new Promise(r => setTimeout(r, 1500));
+            const dup = Array.from(document.querySelectorAll(".layer-row")).filter(r => r.textContent?.includes("Design in code"));
+            return { ok: true, dupCount: dup.length };
+          })()
+        `)
+          .catch((e) => ({ ok: false, error: String(e) }));
+        const dupSource = readFileSync(join(uiProj, "pages/home.tsx"), "utf8");
+        const dupTexts = (dupSource.match(/Design in code/g) ?? []).length;
         log(
-          "UI undo button restores source x",
-          undoResult?.ok === true &&
-            (homeAfterUndo.includes("x={96}") ||
-              homeAfterUndo.includes("x={ 96 }") ||
-              homeAfterUndo.includes("left: 96")),
+          "Ctrl+D duplicate copies Text node content",
+          dupResult?.ok === true &&
+            dupTexts >= 2 &&
+            !dupSource.includes(">Copy<"),
+        );
+        if (dupResult?.ok !== true || dupTexts < 2) {
+          logs.push(
+            `[ui-e2e] duplicate diagnostics ${JSON.stringify(dupResult)} texts=${dupTexts}`,
+          );
+        }
+
+        // Tool switcher: present, clickable, reflects active tool
+        const toolSwitcher = await canvasView.webContents
+          .executeJavaScript(`
+          (async () => {
+            const group = document.querySelector('[aria-label="画布工具"]');
+            if (!group) return { present: false };
+            const buttons = Array.from(group.querySelectorAll("button"));
+            const hand = buttons.find(b => b.getAttribute("aria-label") === "抓手工具");
+            if (!hand) return { present: true, hand: false };
+            hand.click();
+            await new Promise(r => setTimeout(r, 300));
+            const afterClick = group.outerHTML;
+            const activeAfterClick = buttons.map(b => b.getAttribute("aria-checked") ?? b.dataset.state ?? "");
+            return { present: true, hand: true, afterClick, activeAfterClick, html: group.outerHTML.slice(0, 1200) };
+          })()
+        `)
+          .catch((e) => ({ present: false, error: String(e) }));
+        const shellToolAfterClick = await shellWindow.webContents
+          .executeJavaScript(
+            `Boolean(document.querySelector("main.cursor-grab"))`,
+          )
+          .catch(() => false);
+        log(
+          "canvas tool switcher renders and switches to hand",
+          toolSwitcher?.present === true &&
+            toolSwitcher?.hand === true &&
+            shellToolAfterClick === true,
+        );
+        if (toolSwitcher?.present !== true || shellToolAfterClick !== true) {
+          logs.push(
+            `[ui-e2e] tool switcher diagnostics ${JSON.stringify(toolSwitcher).slice(0, 400)} shellGrab=${shellToolAfterClick}`,
+          );
+        }
+        const toolBack = await canvasView.webContents
+          .executeJavaScript(`
+          (async () => {
+            window.dispatchEvent(new KeyboardEvent("keydown", { key: "v", bubbles: true }));
+            await new Promise(r => setTimeout(r, 300));
+            const group = document.querySelector('[aria-label="画布工具"]');
+            return group ? group.outerHTML : null;
+          })()
+        `)
+          .catch(() => null);
+        log(
+          "V key switches tool back to select",
+          typeof toolBack === "string" && toolBack.includes("选择工具"),
         );
 
         // 3. Click "+" button to add page
@@ -2451,6 +2620,69 @@ export default function Home() {
           .catch(() => false);
         log("canvas click selects node in layers", selectedAfterDrag === true);
 
+        const lockedClick = await (async () => {
+          writeFileSync(
+            join(uiProj, "pages/home.tsx"),
+            initialHome
+              .replace(
+                'import { Frame, Text } from "@ombrique/runtime";',
+                'import { Frame, Rect, Text } from "@ombrique/runtime";',
+              )
+              .replace(
+                "<Text x={96}",
+                '<Rect name="Locked" x={500} y={400} width={120} height={80} fill="#22aa66" data-locked="" /><Text x={96}',
+              ),
+            "utf8",
+          );
+          await wait(2500);
+          const point = await canvasView.webContents
+            .executeJavaScript(`
+            (() => {
+              const el = Array.from(document.querySelectorAll(".board *")).find(
+                (n) => n.getAttribute?.("data-name") === "Locked",
+              );
+              if (!el) return null;
+              const r = el.getBoundingClientRect();
+              return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+            })()
+          `)
+            .catch(() => null);
+          if (!point) return { clicked: false };
+          canvasView.webContents.sendInputEvent({
+            type: "mouseDown",
+            x: point.x,
+            y: point.y,
+            button: "left",
+            clickCount: 1,
+          });
+          await wait(150);
+          canvasView.webContents.sendInputEvent({
+            type: "mouseUp",
+            x: point.x,
+            y: point.y,
+            button: "left",
+            clickCount: 1,
+          });
+          await wait(500);
+          const picked = await shellWindow.webContents
+            .executeJavaScript(`
+            document.querySelector(".layer-row.layer-row-selected")?.textContent?.trim() ?? null
+          `)
+            .catch(() => null);
+          return { clicked: true, picked };
+        })();
+        const lockedOk =
+          lockedClick?.clicked === true &&
+          (lockedClick?.picked === null ||
+            !String(lockedClick?.picked).includes("Locked"));
+        log("locked node is not selectable on canvas", lockedOk);
+        if (!lockedOk)
+          logs.push(
+            `[ui-e2e] locked diagnostics ${JSON.stringify(lockedClick)}`,
+          );
+        writeFileSync(join(uiProj, "pages/home.tsx"), initialHome, "utf8");
+        await wait(2000);
+
         // Capture shell.png
         const shellImage = await shellWindow.webContents.capturePage();
         (await import("node:fs")).writeFileSync(
@@ -2458,7 +2690,15 @@ export default function Home() {
           shellImage.toPNG(),
         );
         log("shell screenshot captured", true);
+
+        log(
+          "canvas renderer has no uncaught errors",
+          canvasErrors.length === 0,
+        );
+        for (const message of canvasErrors)
+          logs.push(`[ui-e2e] canvas error: ${message}`);
       }
+      canvasView?.webContents.off("console-message", onCanvasError);
 
       // Cleanup UI temporary project
       try {
@@ -2473,8 +2713,8 @@ export default function Home() {
         logs.push(`[perf-500] ${label} ${ok ? "OK" : "FAIL"}`);
 
       if (canvasView) {
-        if (projectRoot !== exampleProjectRoot()) {
-          projectRoot = exampleProjectRoot();
+        if (projectRoot !== e2eExample) {
+          projectRoot = e2eExample;
           ensureDocHost().send({
             type: "shell",
             message: { kind: "openProject", path: projectRoot },
@@ -2632,8 +2872,8 @@ export default function Home() {
       }
     }
     if (process.env.OMBRIQUE_E2E_INTERACT) {
-      if (projectRoot !== exampleProjectRoot()) {
-        projectRoot = exampleProjectRoot();
+      if (projectRoot !== e2eExample) {
+        projectRoot = e2eExample;
         ensureDocHost().send({
           type: "shell",
           message: { kind: "openProject", path: projectRoot },

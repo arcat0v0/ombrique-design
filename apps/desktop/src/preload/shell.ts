@@ -95,8 +95,31 @@ contextBridge.exposeInMainWorld("ombriqueShell", {
       channel: "ombrique:toolChanged",
       payload: tool,
     }),
+  onToolChanged: (cb: (tool: "select" | "hand") => void) => {
+    ipcRenderer.on("ombrique:fromShellTool", (_event, tool) =>
+      cb(tool === "hand" ? "hand" : "select"),
+    );
+  },
   onClipboardEdit: (cb: (payload: unknown) => void) => {
     ipcRenderer.on("ombrique:clipboardEdit", (_event, payload) => cb(payload));
+  },
+  minimizeWindow: () => {
+    ipcRenderer.send("ombrique:windowControl", "minimize");
+  },
+  toggleWindowMaximize: () => {
+    ipcRenderer.send("ombrique:windowControl", "toggleMaximize");
+  },
+  closeWindow: () => {
+    ipcRenderer.send("ombrique:windowControl", "close");
+  },
+  toggleFullscreen: () => {
+    ipcRenderer.send("ombrique:windowControl", "toggleFullscreen");
+  },
+  toggleDevtools: () => {
+    ipcRenderer.send("ombrique:windowControl", "toggleDevtools");
+  },
+  reloadRenderer: () => {
+    ipcRenderer.send("ombrique:windowControl", "reloadRenderer");
   },
   exportPage: (file: string, defaultName: string) =>
     ipcRenderer.invoke("ombrique:exportPage", { file, defaultName }),

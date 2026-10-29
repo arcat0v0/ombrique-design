@@ -16,7 +16,14 @@ interface PaintEvent extends Event {
 }
 
 interface GPUQueue {
-  drawElementImageToTexture(
+  copyElementImageToTexture?(
+    source: { source: Element },
+    destination: {
+      destination: { texture: GPUTexture };
+      size?: { width: number; height: number };
+    },
+  ): void;
+  drawElementImageToTexture?(
     source: { source: Element },
     destination: {
       texture: GPUTexture;

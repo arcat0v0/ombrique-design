@@ -1,6 +1,7 @@
 import { intersects, visibleRect, zoomAt as cameraZoomAt } from "./camera";
 import type { Camera } from "./camera";
 import { UploadQueue } from "./uploadQueue";
+import { resolveElementImageUpload } from "./element-upload";
 
 export interface BoardInit {
   el: Element;
@@ -138,7 +139,7 @@ export async function createCompositor(
   canvas: HTMLCanvasElement,
   opts: CompositorOptions = {},
 ): Promise<Compositor> {
-  if (canvas.content !== "drawable") canvas.setAttribute("layoutsubtree", "");
+  canvas.setAttribute("layoutsubtree", "");
   if (typeof navigator.gpu === "undefined")
     throw new Error("navigator.gpu unavailable");
 
@@ -152,6 +153,7 @@ export async function createCompositor(
     gpuErrors.push(e.error.message);
     console.error(`[webgpu] ${e.error.message}`);
   });
+  const uploadElementImage = resolveElementImageUpload(device.queue);
 
   const context = canvas.getContext("webgpu");
   if (!context) throw new Error("webgpu canvas context unavailable");
@@ -204,7 +206,8 @@ export async function createCompositor(
     const probe = document.createElement("canvas");
     probe.width = 8;
     probe.height = 8;
-    probe.content = "drawable";
+    probe.setAttribute("content", "drawable");
+    probe.setAttribute("layoutsubtree", "");
     probe.style.cssText =
       "position:fixed;left:-64px;top:0;width:8px;height:8px";
     const inner = document.createElement("div");
@@ -225,7 +228,7 @@ export async function createCompositor(
           GPUTextureUsage.COPY_SRC |
           GPUTextureUsage.RENDER_ATTACHMENT,
       });
-      device.queue.drawElementImageToTexture(
+      uploadElementImage(
         { source: inner },
         { texture: tex, size: { width: 8, height: 8 } },
       );
@@ -340,8 +343,8 @@ export async function createCompositor(
 
   function uploadEl(el: Element): void {
     const b = byEl.get(el);
-    if (!b) return;
-    device.queue.drawElementImageToTexture(
+    if (!b || el.parentElement !== canvas) return;
+    uploadElementImage(
       { source: el },
       { texture: b.tex, size: { width: b.texW, height: b.texH } },
     );
@@ -468,14 +471,14 @@ export async function createCompositor(
 
   function uploadAtScale(el: Element, scale: number): boolean {
     const b = byEl.get(el);
-    if (!b || destroyed) return false;
+    if (!b || destroyed || el.parentElement !== canvas) return false;
     const maxDim = device.limits.maxTextureDimension2D;
     const texW = Math.min(Math.max(1, Math.round(b.w * scale)), maxDim);
     const texH = Math.min(Math.max(1, Math.round(b.h * scale)), maxDim);
     const bytes = texW * texH * 4;
     if (b.hiRes) restoreBase(b);
     const tex = createBoardTexture(texW, texH);
-    device.queue.drawElementImageToTexture(
+    uploadElementImage(
       { source: el },
       { texture: tex, size: { width: texW, height: texH } },
     );

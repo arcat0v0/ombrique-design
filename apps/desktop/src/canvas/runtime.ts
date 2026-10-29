@@ -1,5 +1,6 @@
 import { createRoot, type Root } from "react-dom/client";
 import { createElement, type ComponentType } from "react";
+import { FloatingToolSwitcher } from "@ombrique/editor-ui";
 import type { Manifest } from "@ombrique/protocol";
 import {
   createCompositor,
@@ -264,7 +265,12 @@ async function mountPage(file: string) {
     board = { element, reactRoot: root };
     boards.set(file, board);
     stage.appendChild(element);
-    const component = await importPage(file, Date.now());
+    let component: ComponentType | null = null;
+    try {
+      component = await importPage(file, Date.now());
+    } catch (error) {
+      console.warn(`[canvas] page module unavailable: ${file}`, error);
+    }
     if (component) {
       root.render(createElement(component));
       const { promise, resolve } = Promise.withResolvers<void>();
@@ -363,29 +369,51 @@ function drawOverlay() {
   }
 }
 
+function isSelectableElement(element: Element, board: HTMLElement): boolean {
+  let current: Element | null = element;
+  while (current && current !== board) {
+    if (current.hasAttribute("data-locked")) return false;
+    if (
+      current.hasAttribute("hidden") ||
+      (current instanceof HTMLElement && current.style.display === "none")
+    ) {
+      return false;
+    }
+    current = current.parentElement;
+  }
+  return true;
+}
+
 function hitTest(clientX: number, clientY: number): SelectedNode | null {
   for (const [element, info] of [...nodeIndex].reverse()) {
+    const board = element.closest<HTMLElement>(".board");
+    if (!board || !isSelectableElement(element, board)) continue;
     const bounds = element.getBoundingClientRect();
     if (
-      clientX >= bounds.left &&
-      clientX <= bounds.right &&
-      clientY >= bounds.top &&
-      clientY <= bounds.bottom
+      bounds.width === 0 ||
+      bounds.height === 0 ||
+      !(
+        clientX >= bounds.left &&
+        clientX <= bounds.right &&
+        clientY >= bounds.top &&
+        clientY <= bounds.bottom
+      )
     ) {
-      return {
-        file: info.file,
-        path: info.path,
-        tag: element.tagName.toLowerCase(),
-        name: element.getAttribute("data-name"),
-        rect: {
-          x: bounds.left / camera.z + camera.x,
-          y: bounds.top / camera.z + camera.y,
-          width: bounds.width / camera.z,
-          height: bounds.height / camera.z,
-        },
-        element,
-      };
+      continue;
     }
+    return {
+      file: info.file,
+      path: info.path,
+      tag: element.tagName.toLowerCase(),
+      name: element.getAttribute("data-name"),
+      rect: {
+        x: bounds.left / camera.z + camera.x,
+        y: bounds.top / camera.z + camera.y,
+        width: bounds.width / camera.z,
+        height: bounds.height / camera.z,
+      },
+      element,
+    };
   }
   return null;
 }
@@ -867,17 +895,42 @@ async function init() {
   });
   compositor.camera.set(camera);
 
+  const toolRoot = document.createElement("div");
+  toolRoot.style.cssText =
+    "position:fixed;inset:0;pointer-events:none;z-index:10";
+  const toolMount = document.createElement("div");
+  toolMount.style.cssText =
+    "position:absolute;left:50%;bottom:16px;transform:translateX(-50%);pointer-events:auto";
+  toolRoot.appendChild(toolMount);
+  document.body.appendChild(toolRoot);
+  const toolRoot2 = createRoot(toolMount);
+  const renderToolSwitcher = () => {
+    toolRoot2.render(
+      createElement(FloatingToolSwitcher, {
+        activeTool: toolMode,
+        onSelectTool: (tool: "select" | "hand") => {
+          toolMode = tool;
+          bridge?.send("ombrique:toolChanged", { tool });
+          renderToolSwitcher();
+        },
+      }),
+    );
+  };
+  renderToolSwitcher();
+
   window.addEventListener("keydown", (event) => {
     if (editingText) return;
     const mod = event.metaKey || event.ctrlKey;
     if (event.key === "v" || event.key === "V") {
       if (mod) return;
       toolMode = "select";
+      renderToolSwitcher();
       return;
     }
     if (event.key === "h" || event.key === "H") {
       if (mod) return;
       toolMode = "hand";
+      renderToolSwitcher();
       return;
     }
     if (event.key === "Escape") {

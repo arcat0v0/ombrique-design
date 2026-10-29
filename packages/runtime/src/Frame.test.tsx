@@ -34,6 +34,23 @@ describe("Frame", () => {
     expect(section?.style.padding).toBe("16px");
   });
 
+  it("keeps hidden effective even with flex layout", () => {
+    const { container } = render(
+      <Frame width={100} height={100} layout="vertical" hidden />,
+    );
+    const section = container.querySelector("section");
+    expect(section?.hidden).toBe(true);
+    expect(section?.style.display).toBe("none");
+  });
+
+  it("keeps hidden effective even with grid layout", () => {
+    const { container } = render(
+      <Frame width={100} height={100} grid={{ columns: 2 }} hidden />,
+    );
+    const section = container.querySelector("section");
+    expect(section?.style.display).toBe("none");
+  });
+
   it("applies horizontal flex layout", () => {
     const { container } = render(
       <Frame width={100} height={100} layout="horizontal" gap={4} />,

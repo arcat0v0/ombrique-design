@@ -169,6 +169,13 @@ export interface ShellBridge {
     height: number;
   }) => void;
   reloadCanvas?: () => Promise<boolean>;
+  onToolChanged?: (cb: (tool: "select" | "hand") => void) => void;
+  minimizeWindow?: () => void;
+  toggleWindowMaximize?: () => void;
+  closeWindow?: () => void;
+  toggleFullscreen?: () => void;
+  toggleDevtools?: () => void;
+  reloadRenderer?: () => void;
 }
 
 interface ProjectMessage {
@@ -895,6 +902,24 @@ export function createShellState() {
     zoomToFit: () => {
       bridge?.zoomToFit?.();
     },
+    minimizeWindow: () => {
+      bridge?.minimizeWindow?.();
+    },
+    toggleWindowMaximize: () => {
+      bridge?.toggleWindowMaximize?.();
+    },
+    closeWindow: () => {
+      bridge?.closeWindow?.();
+    },
+    toggleFullscreen: () => {
+      bridge?.toggleFullscreen?.();
+    },
+    toggleDevtools: () => {
+      bridge?.toggleDevtools?.();
+    },
+    reloadRenderer: () => {
+      bridge?.reloadRenderer?.();
+    },
     addPage: () => {
       void sendCommands([
         { kind: "addPage", name: `Page ${view.pages.length + 1}` },
@@ -939,6 +964,34 @@ export function createShellState() {
             kind: "setAttrs",
             target: toRef(node),
             attrs: hasNameProp ? { name } : { "data-name": name },
+          },
+        ]);
+      })();
+    },
+    toggleHiddenForLayer: (layerId, hidden) => {
+      const file = view.activePageId ? pageFileOf(view.activePageId) : null;
+      if (!file || !bridge) return;
+      const path = layerId.split("/").map(Number);
+      void (async () => {
+        const node = await bridge.resolveNode(file, path);
+        if (!node) return;
+        await sendCommands([
+          { kind: "setAttrs", target: toRef(node), attrs: { hidden } },
+        ]);
+      })();
+    },
+    toggleLockedForLayer: (layerId, locked) => {
+      const file = view.activePageId ? pageFileOf(view.activePageId) : null;
+      if (!file || !bridge) return;
+      const path = layerId.split("/").map(Number);
+      void (async () => {
+        const node = await bridge.resolveNode(file, path);
+        if (!node) return;
+        await sendCommands([
+          {
+            kind: "setAttrs",
+            target: toRef(node),
+            attrs: { "data-locked": locked ? "" : null },
           },
         ]);
       })();
@@ -1048,6 +1101,9 @@ export function createShellState() {
     });
     bridge.onZoomChanged?.((zoom) => {
       set({ zoom });
+    });
+    bridge.onToolChanged?.((tool) => {
+      if (view.activeTool !== tool) set({ activeTool: tool });
     });
     bridge.onCanvasEdit?.((payload) => {
       const edit = payload as { commands?: unknown[] };

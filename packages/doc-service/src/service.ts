@@ -128,7 +128,11 @@ export class DocumentService {
     for (const file of outcome.changedFiles) {
       after.set(file, outcome.texts.get(file) ?? "");
     }
-    this.history.record({ before, after, files: outcome.changedFiles });
+    const contentChanged = outcome.changedFiles.some(
+      (file) => before.get(file) !== after.get(file),
+    );
+    if (contentChanged)
+      this.history.record({ before, after, files: outcome.changedFiles });
 
     this.counter += 1;
     const transaction: AppliedTransaction = {

@@ -87,6 +87,7 @@ export interface ShellView {
 
 export interface ShellActions {
   openProject: () => void;
+  openExample?: () => void;
   selectPage: (pageId: string) => void;
   selectLayer: (layerId: string) => void;
   setStyle: (
@@ -120,6 +121,12 @@ export interface ShellActions {
   zoomTo: (factor: number) => void;
   zoomToFit: () => void;
   exportPage: () => void;
+  toggleFullscreen?: () => void;
+  toggleDevtools?: () => void;
+  reloadRenderer?: () => void;
+  minimizeWindow?: () => void;
+  toggleWindowMaximize?: () => void;
+  closeWindow?: () => void;
   exportNode?: (
     format: "png" | "jpg" | "webp" | "svg" | "pdf",
     scale: number,

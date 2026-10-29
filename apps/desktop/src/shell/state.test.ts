@@ -426,3 +426,113 @@ describe("exportNode, bundleProject, openBundle in createShellState", () => {
     expect(openCalled).toBe(true);
   });
 });
+
+describe("toolChanged mirror and per-layer toggles in createShellState", () => {
+  function baseBridge(): Partial<ShellBridge> {
+    return {
+      onProject: () => {},
+      onFiles: () => {},
+      onDoc: () => {},
+      onFatal: () => {},
+      onStats: () => {},
+    };
+  }
+
+  it("mirrors canvas toolChanged into view.activeTool", async () => {
+    const emit: {
+      tool: ((tool: "select" | "hand") => void) | null;
+    } = { tool: null };
+    const mockBridge = {
+      ...baseBridge(),
+      onToolChanged: (cb: (tool: "select" | "hand") => void) => {
+        emit.tool = cb;
+      },
+    };
+    installBridge(mockBridge);
+    const { createShellState } = await import("./state");
+    const state = createShellState();
+
+    expect(state.getView().activeTool).toBe("select");
+    emit.tool?.("hand");
+    expect(state.getView().activeTool).toBe("hand");
+    emit.tool?.("hand");
+    emit.tool?.("select");
+    expect(state.getView().activeTool).toBe("select");
+  });
+
+  it("toggleHiddenForLayer sends setAttrs with resolved node ref", async () => {
+    const sentCommands: SentCommand[] = [];
+    const mockBridge = {
+      ...baseBridge(),
+      send: async (msg: unknown) => {
+        sentCommands.push(msg as SentCommand);
+        return true;
+      },
+      versions: async () => ({}),
+      resolveNode: async () => ({
+        ref: { file: "pages/home.tsx", start: 10, end: 40 },
+        path: [0, 1],
+        tag: "section",
+        kind: "frame",
+        generated: false,
+        name: "Hero",
+        hidden: false,
+        locked: false,
+        text: "",
+        style: [],
+        attrs: [],
+      }),
+    };
+    installBridge(mockBridge);
+    const { createShellState } = await import("./state");
+    const state = createShellState();
+
+    await state.actions.toggleHiddenForLayer?.("0/1", true);
+    await new Promise((r) => setTimeout(r, 20));
+    const command = sentCommands[0] as {
+      commands?: Array<{ kind: string; attrs?: Record<string, unknown> }>;
+    };
+    expect(command.commands?.[0]?.kind).toBe("setAttrs");
+    expect(command.commands?.[0]?.attrs).toEqual({ hidden: true });
+  });
+
+  it("toggleLockedForLayer sends data-locked set and clear", async () => {
+    const sentCommands: SentCommand[] = [];
+    const mockBridge = {
+      ...baseBridge(),
+      send: async (msg: unknown) => {
+        sentCommands.push(msg as SentCommand);
+        return true;
+      },
+      versions: async () => ({}),
+      resolveNode: async () => ({
+        ref: { file: "pages/home.tsx", start: 10, end: 40 },
+        path: [0, 1],
+        tag: "section",
+        kind: "frame",
+        generated: false,
+        name: "Hero",
+        hidden: false,
+        locked: false,
+        text: "",
+        style: [],
+        attrs: [],
+      }),
+    };
+    installBridge(mockBridge);
+    const { createShellState } = await import("./state");
+    const state = createShellState();
+
+    await state.actions.toggleLockedForLayer?.("0/1", true);
+    await state.actions.toggleLockedForLayer?.("0/1", false);
+    await new Promise((r) => setTimeout(r, 20));
+    const first = sentCommands[0] as {
+      commands?: Array<{ kind: string; attrs?: Record<string, unknown> }>;
+    };
+    const second = sentCommands[1] as {
+      commands?: Array<{ kind: string; attrs?: Record<string, unknown> }>;
+    };
+    expect(first.commands?.[0]?.attrs).toEqual({ "data-locked": "" });
+    expect(second.commands?.[0]?.attrs).toEqual({ "data-locked": null });
+  });
+});

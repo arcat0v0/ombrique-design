@@ -40,4 +40,41 @@ describe("History", () => {
     expect(history.size).toBe(1);
     expect(history.undo()?.files).toEqual(["b.tsx"]);
   });
+
+  it("coalesces no-op records that do not change content", () => {
+    const history = new History();
+    history.record({
+      before: new Map([["a", "1"]]),
+      after: new Map([["a", "2"]]),
+      files: ["a"],
+    });
+    history.record({
+      before: new Map([["a", "2"]]),
+      after: new Map([["a", "2"]]),
+      files: ["a"],
+    });
+    expect(history.size).toBe(1);
+    expect(history.undo()?.after.get("a")).toBe("2");
+    expect(history.undo()).toBeNull();
+  });
+
+  it("coalesces repeated identical records into one undo step", () => {
+    const history = new History();
+    history.record({
+      before: new Map([["a", "1"]]),
+      after: new Map([["a", "2"]]),
+      files: ["a"],
+    });
+    history.record({
+      before: new Map([["a", "2"]]),
+      after: new Map([["a", "2"]]),
+      files: ["a"],
+    });
+    history.record({
+      before: new Map([["a", "2"]]),
+      after: new Map([["a", "2"]]),
+      files: ["a"],
+    });
+    expect(history.size).toBe(1);
+  });
 });

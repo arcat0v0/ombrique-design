@@ -129,6 +129,24 @@ describe("DocumentService", () => {
     expect(readFileSync(join(root, "pages/home.tsx"), "utf8")).toBe(afterApply);
   });
 
+  it("collapses a duplicate no-op commit so one undo restores the original", () => {
+    const target = elementAt([0, 0]);
+    const command = () => ({
+      kind: "setStyle" as const,
+      target: {
+        file: "pages/home.tsx",
+        start: target?.ref.start ?? 0,
+        end: target?.ref.end ?? 0,
+        path: target?.path,
+      },
+      declarations: [["color", "#00ff00"]] as Array<[string, string]>,
+    });
+    service.apply([command()], []);
+    service.apply([command()], []);
+    service.undo();
+    expect(readFileSync(join(root, "pages/home.tsx"), "utf8")).toBe(HOME_PAGE);
+  });
+
   it("reports history availability through events", () => {
     const target = elementAt([0, 0]);
     service.apply(

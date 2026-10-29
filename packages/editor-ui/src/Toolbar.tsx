@@ -9,11 +9,9 @@ import {
   FolderOpenIcon,
   FrameIcon,
   GroupIcon,
-  HandIcon,
   ImageIcon,
   Loader2Icon,
   Maximize2Icon,
-  MousePointer2Icon,
   PackageOpenIcon,
   Redo2Icon,
   SquareIcon,
@@ -41,6 +39,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Kbd } from "@/components/ui/kbd";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -50,6 +49,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import type { CanvasStats } from "./types";
+import { ApplicationMenu } from "./ApplicationMenu";
 
 export type InsertKind =
   | "frame"
@@ -61,31 +61,38 @@ export type InsertKind =
 export interface ToolbarProps {
   canUndo: boolean;
   canRedo: boolean;
+  canDelete?: boolean;
   zoom: number;
   stats: CanvasStats | null;
   busy: boolean;
-  activeTool?: "select" | "hand";
   canGroup?: boolean;
   canUngroup?: boolean;
   canFlatten?: boolean;
   canCreateComponent?: boolean;
   createComponentNameDefault?: string;
   createDisabledReason?: string;
-  onSelectTool?: (tool: "select" | "hand") => void;
   onGroupSelection?: () => void;
   onUngroupSelection?: () => void;
   onFlattenSelection?: () => Promise<boolean> | undefined;
   onInsertImage?: () => Promise<boolean> | undefined;
   onCreateComponent?: (name: string) => void;
   onOpenProject: () => void;
+  onOpenExample?: () => void;
   onOpenBundle?: () => Promise<boolean> | undefined;
   onBundleProject?: () => Promise<boolean> | undefined;
   onUndo: () => void;
   onRedo: () => void;
   onCreateNode: (kind: InsertKind) => void;
+  onDeleteSelection?: () => void;
   onZoomTo?: (factor: number) => void;
   onZoomToFit: () => void;
   onExport: () => void;
+  onToggleFullscreen?: () => void;
+  onToggleDevtools?: () => void;
+  onReloadRenderer?: () => void;
+  onMinimizeWindow?: () => void;
+  onToggleWindowMaximize?: () => void;
+  onCloseWindow?: () => void;
 }
 
 const INSERT_TOOLS: Array<{
@@ -104,31 +111,38 @@ const INSERT_TOOLS: Array<{
 export function Toolbar({
   canUndo,
   canRedo,
+  canDelete,
   zoom,
   stats,
   busy,
-  activeTool = "select",
   canGroup = false,
   canUngroup = false,
   canFlatten = false,
   canCreateComponent = false,
   createComponentNameDefault = "Component",
   createDisabledReason,
-  onSelectTool,
   onGroupSelection,
   onUngroupSelection,
   onFlattenSelection,
   onInsertImage,
   onCreateComponent,
   onOpenProject,
+  onOpenExample,
   onOpenBundle,
   onBundleProject,
   onUndo,
   onRedo,
   onCreateNode,
+  onDeleteSelection,
   onZoomTo,
   onZoomToFit,
   onExport,
+  onToggleFullscreen,
+  onToggleDevtools,
+  onReloadRenderer,
+  onMinimizeWindow,
+  onToggleWindowMaximize,
+  onCloseWindow,
 }: ToolbarProps) {
   const [componentDialogOpen, setComponentDialogOpen] = useState(false);
   const [componentName, setComponentName] = useState("");
@@ -136,6 +150,29 @@ export function Toolbar({
     <TooltipProvider delayDuration={200}>
       <div className="flex h-10 w-full items-center justify-between border-b border-border bg-card/80 px-2.5 backdrop-blur-xs select-none">
         <div className="flex items-center gap-1">
+          <ApplicationMenu
+            canUndo={canUndo}
+            canRedo={canRedo}
+            canDelete={canDelete}
+            zoom={zoom}
+            busy={busy}
+            onOpenProject={onOpenProject}
+            onOpenExample={onOpenExample}
+            onExport={onExport}
+            onUndo={onUndo}
+            onRedo={onRedo}
+            onDeleteSelection={onDeleteSelection}
+            onZoomTo={onZoomTo}
+            onZoomToFit={onZoomToFit}
+            onToggleFullscreen={onToggleFullscreen}
+            onToggleDevtools={onToggleDevtools}
+            onReloadRenderer={onReloadRenderer}
+            onMinimizeWindow={onMinimizeWindow}
+            onToggleWindowMaximize={onToggleWindowMaximize}
+            onCloseWindow={onCloseWindow}
+          />
+
+          <Separator orientation="vertical" className="mx-1 h-4" />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
@@ -178,50 +215,6 @@ export function Toolbar({
 
           <Separator orientation="vertical" className="mx-1 h-4" />
 
-          <div
-            className="flex items-center gap-0.5"
-            role="toolbar"
-            aria-label="操作模式"
-          >
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  variant={activeTool === "select" ? "secondary" : "ghost"}
-                  size="icon-xs"
-                  aria-label="选择工具"
-                  title="选择工具 (V)"
-                  disabled={busy}
-                  onClick={() => onSelectTool?.("select")}
-                  className="size-7"
-                >
-                  <MousePointer2Icon data-icon="inline-start" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">选择工具 (V)</TooltipContent>
-            </Tooltip>
-
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  variant={activeTool === "hand" ? "secondary" : "ghost"}
-                  size="icon-xs"
-                  aria-label="抓手工具"
-                  title="抓手工具 (H)"
-                  disabled={busy}
-                  onClick={() => onSelectTool?.("hand")}
-                  className="size-7"
-                >
-                  <HandIcon data-icon="inline-start" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">抓手平移 (H)</TooltipContent>
-            </Tooltip>
-          </div>
-
-          <Separator orientation="vertical" className="mx-1 h-4" />
-
           <div className="flex items-center gap-0.5">
             <Tooltip>
               <TooltipTrigger asChild>
@@ -238,7 +231,10 @@ export function Toolbar({
                   <Undo2Icon data-icon="inline-start" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent side="bottom">撤销 (Ctrl/Cmd+Z)</TooltipContent>
+              <TooltipContent side="bottom">
+                <span>撤销</span>
+                <Kbd>Ctrl+Z</Kbd>
+              </TooltipContent>
             </Tooltip>
 
             <Tooltip>
@@ -257,7 +253,8 @@ export function Toolbar({
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="bottom">
-                重做 (Ctrl/Cmd+Shift+Z)
+                <span>重做</span>
+                <Kbd>Ctrl+Shift+Z</Kbd>
               </TooltipContent>
             </Tooltip>
           </div>
@@ -312,7 +309,7 @@ export function Toolbar({
                   variant="ghost"
                   size="icon-xs"
                   aria-label="编组"
-                  title="编组 (Cmd/Ctrl+G)"
+                  title="编组"
                   disabled={busy || !canGroup}
                   onClick={onGroupSelection}
                   className="size-7"
@@ -321,7 +318,14 @@ export function Toolbar({
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="bottom">
-                {canGroup ? "编组所选图层 (Cmd/Ctrl+G)" : "未选中可编辑图层"}
+                {canGroup ? (
+                  <>
+                    <span>编组所选图层</span>
+                    <Kbd>Ctrl+G</Kbd>
+                  </>
+                ) : (
+                  "未选中可编辑图层"
+                )}
               </TooltipContent>
             </Tooltip>
 
@@ -332,7 +336,7 @@ export function Toolbar({
                   variant="ghost"
                   size="icon-xs"
                   aria-label="解组"
-                  title="解组 (Cmd/Ctrl+Shift+G)"
+                  title="解组"
                   disabled={busy || !canUngroup}
                   onClick={onUngroupSelection}
                   className="size-7"
@@ -341,9 +345,14 @@ export function Toolbar({
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="bottom">
-                {canUngroup
-                  ? "解除编组 (Cmd/Ctrl+Shift+G)"
-                  : "仅 Group 容器可解组"}
+                {canUngroup ? (
+                  <>
+                    <span>解除编组</span>
+                    <Kbd>Ctrl+Shift+G</Kbd>
+                  </>
+                ) : (
+                  "仅 Group 容器可解组"
+                )}
               </TooltipContent>
             </Tooltip>
 

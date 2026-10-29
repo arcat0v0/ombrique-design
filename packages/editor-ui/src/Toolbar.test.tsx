@@ -50,6 +50,19 @@ describe("Toolbar", () => {
     expect(callbacks.onRedo).toHaveBeenCalledTimes(1);
   });
 
+  it("shows kbd hints for actual toolbar keyboard shortcuts", async () => {
+    const { findByText, getByLabelText } = renderToolbar({
+      canUndo: true,
+      canGroup: true,
+    });
+
+    fireEvent.focus(getByLabelText("撤销"));
+    expect((await findByText("Ctrl+Z")).tagName).toBe("KBD");
+
+    fireEvent.focus(getByLabelText("编组"));
+    expect((await findByText("Ctrl+G")).tagName).toBe("KBD");
+  });
+
   it("disables all buttons while busy", () => {
     const { getByLabelText } = renderToolbar({ busy: true, canUndo: true });
     expect((getByLabelText("打开项目") as HTMLButtonElement).disabled).toBe(
@@ -98,22 +111,6 @@ describe("Toolbar", () => {
   it("hides stats when they are null", () => {
     const { queryByLabelText } = renderToolbar({ stats: null });
     expect(queryByLabelText("画布统计")).toBeNull();
-  });
-
-  it("supports switching between select and hand tools", () => {
-    const onSelectTool = vi.fn();
-    const { getByLabelText } = renderToolbar({
-      activeTool: "select",
-      onSelectTool,
-    });
-
-    const handBtn = getByLabelText("抓手工具");
-    handBtn.click();
-    expect(onSelectTool).toHaveBeenCalledWith("hand");
-
-    const selectBtn = getByLabelText("选择工具");
-    selectBtn.click();
-    expect(onSelectTool).toHaveBeenCalledWith("select");
   });
 
   it("controls Group and Ungroup button disabled state and click callbacks", () => {

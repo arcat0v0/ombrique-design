@@ -100,6 +100,7 @@ export function Frame({
   }
   if (fill !== undefined) base.background = fill;
   if (radius !== undefined) base.borderRadius = radius;
+  if (rest.hidden) base.display = "none";
   return (
     <section
       {...rest}

@@ -23,14 +23,9 @@ export interface ShellProps {
 
 export function Shell({ view, actions }: ShellProps) {
   const canvasMountRef = useRef<HTMLDivElement>(null);
-  const [internalTool, setInternalTool] = useState<"select" | "hand">("select");
   const [leftTab, setLeftTab] = useState<"layers" | "tokens">("layers");
-  const activeTool = view.activeTool ?? internalTool;
+  const activeTool = view.activeTool ?? "select";
 
-  const handleSelectTool = (tool: "select" | "hand") => {
-    setInternalTool(tool);
-    actions.setTool?.(tool);
-  };
   const handleGroup = useCallback(() => {
     if (!view.selection?.editable) return;
     let entered: string | null = null;
@@ -61,9 +56,10 @@ export function Shell({ view, actions }: ShellProps) {
         return;
       }
       const mod = event.metaKey || event.ctrlKey;
-      if (mod && event.key.toLowerCase() === "z") {
+      const key = event.key.toLowerCase();
+      if (mod && (key === "z" || key === "y")) {
         event.preventDefault();
-        if (event.shiftKey) {
+        if (key === "y" || event.shiftKey) {
           actions.redo();
         } else {
           actions.undo();
@@ -149,10 +145,10 @@ export function Shell({ view, actions }: ShellProps) {
               <Toolbar
                 canUndo={view.canUndo}
                 canRedo={view.canRedo}
+                canDelete={Boolean(view.selection?.editable)}
                 zoom={view.zoom}
                 stats={view.stats}
                 busy={view.busy}
-                activeTool={activeTool}
                 canGroup={Boolean(view.selection?.editable)}
                 canUngroup={Boolean(
                   view.selection?.editable &&
@@ -170,20 +166,27 @@ export function Shell({ view, actions }: ShellProps) {
                 createComponentNameDefault={createComponentNameDefault}
                 createDisabledReason={createDisabledReason}
                 onCreateComponent={(name) => actions.createComponent?.(name)}
-                onSelectTool={handleSelectTool}
                 onGroupSelection={handleGroup}
                 onUngroupSelection={actions.ungroupSelection}
                 onFlattenSelection={actions.flattenSelection}
                 onInsertImage={actions.insertImage}
                 onOpenProject={actions.openProject}
+                onOpenExample={actions.openExample}
                 onOpenBundle={actions.openBundle}
                 onBundleProject={actions.bundleProject}
                 onUndo={actions.undo}
                 onRedo={actions.redo}
+                onDeleteSelection={actions.deleteSelection}
                 onCreateNode={actions.createNode}
                 onZoomTo={actions.zoomTo}
                 onZoomToFit={actions.zoomToFit}
                 onExport={actions.exportPage}
+                onToggleFullscreen={actions.toggleFullscreen}
+                onToggleDevtools={actions.toggleDevtools}
+                onReloadRenderer={actions.reloadRenderer}
+                onMinimizeWindow={actions.minimizeWindow}
+                onToggleWindowMaximize={actions.toggleWindowMaximize}
+                onCloseWindow={actions.closeWindow}
               />
             );
           })()}

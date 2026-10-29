@@ -12,6 +12,20 @@ export class History {
   private counter = 0;
 
   record(entry: Omit<HistoryEntry, "id" | "createdAt">): HistoryEntry {
+    const last = this.past[this.past.length - 1];
+    const overlaps =
+      last !== undefined &&
+      entry.files.some((file) => last.files.includes(file));
+    if (last && overlaps && this.sameContent(last.after, entry.after)) {
+      this.counter += 1;
+      const full: HistoryEntry = {
+        ...entry,
+        id: `h${this.counter}`,
+        createdAt: Date.now(),
+      };
+      this.future = [];
+      return full;
+    }
     this.counter += 1;
     const full: HistoryEntry = {
       ...entry,
@@ -21,6 +35,14 @@ export class History {
     this.past.push(full);
     this.future = [];
     return full;
+  }
+
+  private sameContent(a: Map<string, string>, b: Map<string, string>): boolean {
+    if (a.size !== b.size) return false;
+    for (const [file, text] of a) {
+      if (b.get(file) !== text) return false;
+    }
+    return true;
   }
 
   undo(): HistoryEntry | null {
