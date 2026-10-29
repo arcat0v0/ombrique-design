@@ -1,6 +1,5 @@
 import { createServer, createServerHotChannel, DevEnvironment } from "vite";
 import { createRequire } from "node:module";
-import react from "@vitejs/plugin-react";
 export type { WirePayload } from "./channel";
 import {
   createChannelBridge,
@@ -30,14 +29,18 @@ export async function createDesignCompiler(
     root,
     logLevel: "warn",
     configFile: false,
-    plugins: [react()],
     server: { middlewareMode: true, ws: false },
+    oxc: { jsx: { runtime: "automatic", development: true } },
     resolve: {
       alias: [
         { find: /^react$/, replacement: require.resolve("react") },
         {
           find: /^react\/jsx-dev-runtime$/,
           replacement: require.resolve("react/jsx-dev-runtime"),
+        },
+        {
+          find: /^react\/jsx-runtime$/,
+          replacement: require.resolve("react/jsx-runtime"),
         },
         { find: /^react-dom$/, replacement: require.resolve("react-dom") },
         {

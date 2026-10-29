@@ -42,12 +42,13 @@ describe("design compiler", () => {
     const code = await compiler.transform("/pages/home.tsx");
     expect(code).toBeTruthy();
     expect(code).toContain("jsxDEV");
-    expect(code).toContain("hot.accept");
+    expect(code).toContain("jsxDEV");
     expect(code).not.toContain('from "@ombrique/runtime"');
   });
-  it("serves the react refresh preamble as a virtual module", async () => {
-    const code = await compiler.transform("/@react-refresh");
-    expect(code).toBeTruthy();
+  it("keeps the transformed module free of hmr accept wrappers", async () => {
+    const code = await compiler.transform("/pages/home.tsx");
+    expect(code).not.toContain("hot.accept");
+    expect(code).not.toContain("RefreshRuntime");
   });
 
   it("returns null for missing modules", async () => {
@@ -64,7 +65,8 @@ describe("design compiler", () => {
     const { promise, resolve } = Promise.withResolvers<void>();
     compiler.setWire((payload) => {
       wire.push(payload);
-      if (payload.type === "update") resolve();
+      if (payload.type === "update" || payload.type === "full-reload")
+        resolve();
     });
     writeFileSync(
       join(root, "pages", "home.tsx"),
@@ -76,8 +78,13 @@ export default function Home() {
 `,
     );
     await promise;
-    const update = wire.find((p) => p.type === "update");
-    const updates = update?.updates as Array<{ type: string; path: string }>;
-    expect(updates.some((u) => u.path === "/pages/home.tsx")).toBe(true);
+    const reload = wire.find(
+      (p) => p.type === "update" || p.type === "full-reload",
+    );
+    expect(reload).toBeDefined();
+    if (reload?.type === "update") {
+      const updates = reload.updates as Array<{ type: string; path: string }>;
+      expect(updates.some((u) => u.path === "/pages/home.tsx")).toBe(true);
+    }
   }, 20000);
 });

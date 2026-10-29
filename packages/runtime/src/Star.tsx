@@ -26,6 +26,7 @@ export function Star({
 }: StarProps) {
   return (
     <svg
+      aria-hidden="true"
       width={size}
       height={size}
       viewBox={`0 0 ${size} ${size}`}

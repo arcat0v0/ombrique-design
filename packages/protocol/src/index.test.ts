@@ -42,6 +42,54 @@ describe("editCommandSchema", () => {
     };
     expect(editCommandSchema.parse(cmd)).toEqual(cmd);
   });
+
+  it("accepts groupNodes with targets, parent and name", () => {
+    const cmd = {
+      kind: "groupNodes",
+      targets: [{ file: "pages/home.tsx", start: 100, end: 200, path: [0, 0] }],
+      parent: null,
+      pageFile: "pages/home.tsx",
+      index: 0,
+      name: "Card Group",
+    };
+    expect(editCommandSchema.parse(cmd)).toEqual(cmd);
+  });
+
+  it("accepts ungroupNode and rejects empty groupNodes targets", () => {
+    expect(
+      editCommandSchema.parse({
+        kind: "ungroupNode",
+        target: { file: "pages/home.tsx", start: 0, end: 10, path: [0] },
+      }).kind,
+    ).toBe("ungroupNode");
+    expect(
+      editCommandSchema.safeParse({
+        kind: "groupNodes",
+        targets: [],
+        parent: null,
+        pageFile: "pages/home.tsx",
+        index: 0,
+        name: "G",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("accepts duplicateNode with a target and offset", () => {
+    const cmd = {
+      kind: "duplicateNode",
+      target: { file: "pages/home.tsx", start: 120, end: 180, path: [0, 1] },
+      dx: 20,
+      dy: 20,
+    };
+    expect(editCommandSchema.parse(cmd)).toEqual(cmd);
+  });
+
+  it("rejects duplicateNode without a target", () => {
+    expect(
+      editCommandSchema.safeParse({ kind: "duplicateNode", dx: 20, dy: 20 })
+        .success,
+    ).toBe(false);
+  });
 });
 
 describe("manifestSchema", () => {

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Ombrique Canvas</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #0e0e12;
+      }
+      .board {
+        position: absolute;
+        top: 0;
+        left: 0;
+        background: #ffffff;
+        overflow: hidden;
+      }
+      #cv {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+      #overlay {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+      }
+      .selection-box {
+        position: absolute;
+        border: 1px solid #4c8dff;
+        box-sizing: border-box;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="cv" content="drawable"></canvas>
+    <div id="overlay"></div>
+    <script type="module" src="/canvas-runtime.js"></script>
+  </body>
+</html>

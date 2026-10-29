@@ -1,0 +1,7 @@
+{
+  "formatVersion": 1,
+  "pages": [
+    { "id": "home", "name": "Home", "file": "pages/home.tsx" },
+    { "id": "pricing", "name": "Pricing", "file": "pages/pricing.tsx" }
+  ]
+}

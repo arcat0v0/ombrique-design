@@ -1,7 +1,39 @@
-import type { HTMLAttributes } from "react";
+import type { CSSProperties, HTMLAttributes } from "react";
 import { dataNameAttr, joinClass } from "./internal";
 
 export type FrameLayout = "free" | "vertical" | "horizontal";
+export type FrameAlign = "start" | "center" | "end" | "stretch" | "baseline";
+export type FrameJustify =
+  | "start"
+  | "center"
+  | "end"
+  | "space-between"
+  | "space-around";
+
+export interface FrameGrid {
+  columns?: number;
+  rows?: number;
+  gap?: number;
+  columnGap?: number;
+  rowGap?: number;
+  padding?: number;
+}
+
+const ALIGN_TO_CSS: Record<FrameAlign, CSSProperties["alignItems"]> = {
+  start: "flex-start",
+  center: "center",
+  end: "flex-end",
+  stretch: "stretch",
+  baseline: "baseline",
+};
+
+const JUSTIFY_TO_CSS: Record<FrameJustify, CSSProperties["justifyContent"]> = {
+  start: "flex-start",
+  center: "center",
+  end: "flex-end",
+  "space-between": "space-between",
+  "space-around": "space-around",
+};
 
 export interface FrameProps extends HTMLAttributes<HTMLElement> {
   name?: string;
@@ -11,8 +43,12 @@ export interface FrameProps extends HTMLAttributes<HTMLElement> {
   height: number;
   fill?: string;
   layout?: FrameLayout;
+  align?: FrameAlign;
+  justify?: FrameJustify;
+  wrap?: boolean;
   gap?: number;
   padding?: number;
+  grid?: FrameGrid;
   radius?: number;
 }
 
@@ -23,8 +59,12 @@ export function Frame({
   height,
   fill,
   layout = "free",
+  align,
+  justify,
+  wrap,
   gap,
   padding,
+  grid,
   radius,
   name,
   className,
@@ -44,6 +84,19 @@ export function Frame({
     base.flexDirection = layout === "vertical" ? "column" : "row";
     if (gap !== undefined) base.gap = gap;
     if (padding !== undefined) base.padding = padding;
+    if (align !== undefined) base.alignItems = ALIGN_TO_CSS[align];
+    if (justify !== undefined) base.justifyContent = JUSTIFY_TO_CSS[justify];
+    if (wrap) base.flexWrap = "wrap";
+  } else if (grid) {
+    base.display = "grid";
+    if (grid.columns !== undefined)
+      base.gridTemplateColumns = `repeat(${grid.columns}, 1fr)`;
+    if (grid.rows !== undefined)
+      base.gridTemplateRows = `repeat(${grid.rows}, 1fr)`;
+    if (grid.gap !== undefined) base.gap = grid.gap;
+    if (grid.columnGap !== undefined) base.columnGap = grid.columnGap;
+    if (grid.rowGap !== undefined) base.rowGap = grid.rowGap;
+    if (grid.padding !== undefined) base.padding = grid.padding;
   }
   if (fill !== undefined) base.background = fill;
   if (radius !== undefined) base.borderRadius = radius;

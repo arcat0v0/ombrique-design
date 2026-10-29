@@ -1,4 +1,4 @@
-export function urlToProjectPath(root: string, url: string): string | null {
+export function urlToProjectPath(url: string): string | null {
   if (url.startsWith("/@fs/")) return null;
   if (url.startsWith("/@id/")) return null;
   if (url.startsWith("/@vite/")) return null;

@@ -1,10 +1,15 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "types": ["node"],
+    "types": ["node", "@webgpu/types"],
     "paths": {
-      "@ombrique/*": ["../../packages/*/src/index.ts"]
+      "@ombrique/*": ["../../packages/*/src/index.ts"],
+      "@/*": ["../../packages/editor-ui/src/*"]
     }
   },
-  "include": ["src", "electron.vite.config.ts"]
+  "include": [
+    "src",
+    "electron.vite.config.ts",
+    "../../packages/canvas/src/canvas-in-canvas.d.ts"
+  ]
 }

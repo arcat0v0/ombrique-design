@@ -10,7 +10,9 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "check": "biome check .",
-    "fix": "biome check --write ."
+    "fix": "biome check --write .",
+    "start": "pnpm --filter @ombrique/desktop start",
+    "build": "pnpm --filter @ombrique/desktop build"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.10",

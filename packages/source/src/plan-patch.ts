@@ -83,12 +83,17 @@ function genSpec(spec: NodeSpec): string {
   if (spec.kind !== "text") style.push(`height: ${spec.height}`);
   if (spec.kind === "text" && spec.fontSize !== undefined)
     style.push(`fontSize: ${spec.fontSize}`);
-  if (spec.fill !== undefined)
+  if (spec.kind !== "image" && spec.fill !== undefined)
     style.push(`background: ${JSON.stringify(spec.fill)}`);
   const styleAttr = `style={{ ${style.join(", ")} }}`;
   if (spec.kind === "text")
     return `<Text ${styleAttr}>${escapeJsxText(spec.text)}</Text>`;
   const nameAttr = `data-name=${JSON.stringify(spec.name)}`;
+  if (spec.kind === "image") {
+    const radiusAttr =
+      spec.radius !== undefined ? ` radius={${spec.radius}}` : "";
+    return `<Image ${nameAttr} ${styleAttr} src=${JSON.stringify(spec.src)}${radiusAttr} />`;
+  }
   if (spec.kind === "frame") return `<Frame ${nameAttr} ${styleAttr} />`;
   if (spec.kind === "rect") return `<Rect ${nameAttr} ${styleAttr} />`;
   if (spec.kind === "ellipse") return `<Ellipse ${nameAttr} ${styleAttr} />`;
@@ -120,6 +125,30 @@ function mergeSpans(spans: Span[]): Span[] {
     }
   }
   return out;
+}
+
+function remapEdit(edit: TextEdit, applied: TextEdit[]): TextEdit {
+  if (applied.length === 0) return edit;
+  const sorted = [...applied].sort(
+    (a, b) => a.start - b.start || a.end - b.end,
+  );
+  const mapPos = (offset: number): number => {
+    let shift = 0;
+    for (const earlier of sorted) {
+      const delta = earlier.text.length - (earlier.end - earlier.start);
+      const curStart = earlier.start + shift;
+      const curEnd = earlier.end + shift;
+      if (offset <= curStart) return offset - shift;
+      if (offset < curEnd) {
+        throw new Error(
+          "planned edit overlaps an earlier edit in the same transaction",
+        );
+      }
+      shift += delta;
+    }
+    return offset - shift;
+  };
+  return { ...edit, start: mapPos(edit.start), end: mapPos(edit.end) };
 }
 
 interface JsonValue {
@@ -331,7 +360,7 @@ function manifestModel(text: string): ManifestModel {
   if (root.kind !== "object")
     throw new Error("ombrique.json: root must be an object");
   const pagesProp = root.props.find((p) => p.key === "pages");
-  if (!pagesProp || pagesProp.value.kind !== "array")
+  if (pagesProp?.value.kind !== "array")
     throw new Error("ombrique.json: missing pages array");
   const entries: ManifestEntryModel[] = [];
   for (const item of pagesProp.value.items) {
@@ -373,7 +402,11 @@ function insertAttrPos(code: string, el: DesignElement): number {
   const open = el.openingSpan;
   if (el.selfClosing) {
     const slash = code.lastIndexOf("/", open.end);
-    if (slash >= open.start) return slash;
+    if (slash >= open.start) {
+      let pos = slash;
+      if (code[pos - 1] === " " || code[pos - 1] === "\t") pos--;
+      return pos;
+    }
   }
   return open.end - 1;
 }
@@ -414,6 +447,10 @@ function planChildInsert(
     const closing = parent.closingSpan;
     const closingLine = lineStart(code, closing.start);
     const between = code.slice(closingLine, closing.start);
+    const firstKid = kids[0];
+    const childIndent = firstKid
+      ? lineIndentAt(code, firstKid.ref.start)
+      : `${between}  `;
     if (
       closingLine > 0 &&
       code[closingLine - 1] === "\n" &&
@@ -423,7 +460,7 @@ function planChildInsert(
         file: parent.ref.file,
         start: closingLine,
         end: closingLine,
-        text: `${between}${elemBlock}\n`,
+        text: `${childIndent}${elemBlock}\n`,
       };
     }
     return {
@@ -542,12 +579,20 @@ class Planner {
       else byFile.set(edit.file, [edit]);
     }
     for (const [file, fileEdits] of byFile) {
-      this.texts.set(file, applyEdits(this.textOf(file), fileEdits));
+      const base = this.texts.get(file) ?? "";
+      this.texts.set(file, applyEdits(base, fileEdits));
       this.parsedCache.delete(file);
       if (file === this.index.manifestFile) this.manifestCache = null;
       this.changedFiles.add(file);
     }
-    this.edits.push(...commandEdits);
+    const appliedByFile = new Map<string, TextEdit[]>();
+    for (const edit of commandEdits) {
+      const applied =
+        appliedByFile.get(edit.file) ??
+        this.edits.filter((e) => e.file === edit.file);
+      if (!appliedByFile.has(edit.file)) appliedByFile.set(edit.file, applied);
+      this.edits.push(remapEdit(edit, applied));
+    }
   }
 
   setStyle(target: NodeRef, declarations: Declaration[]): TextEdit[] {
@@ -699,7 +744,85 @@ class Planner {
     const parentEl = parent ? this.anchor(parent) : this.pageRoot(pageFile);
     const code = this.textOf(parentEl.ref.file);
     const elemBlock = specs.map(genSpec).join("\n");
-    return [planChildInsert(code, parentEl, index, elemBlock)];
+    const edits: TextEdit[] = [
+      planChildInsert(code, parentEl, index, elemBlock),
+    ];
+    const primitiveByKind: Record<string, string> = {
+      frame: "Frame",
+      rect: "Rect",
+      ellipse: "Ellipse",
+      star: "Star",
+      text: "Text",
+      image: "Image",
+    };
+    const needed = specs
+      .map((spec) => primitiveByKind[spec.kind])
+      .filter((name): name is string => Boolean(name));
+    const importEdit = this.ensureRuntimeImports(parentEl.ref.file, needed);
+    if (importEdit) edits.push(importEdit);
+    return edits;
+  }
+
+  duplicateNode(target: NodeRef, dx: number, dy: number): TextEdit[] {
+    const el = this.anchor(target);
+    const code = this.textOf(el.ref.file);
+    const raw = code.slice(el.ref.start, el.ref.end);
+    const base = el.ref.start;
+    const shifted: TextEdit[] = [];
+    const left = el.style.find((prop) => prop.key === "left");
+    if (left?.valueSpan && typeof left.value === "number")
+      shifted.push({
+        file: el.ref.file,
+        start: left.valueSpan.start - base,
+        end: left.valueSpan.end - base,
+        text: String(left.value + dx),
+      });
+    const top = el.style.find((prop) => prop.key === "top");
+    if (top?.valueSpan && typeof top.value === "number")
+      shifted.push({
+        file: el.ref.file,
+        start: top.valueSpan.start - base,
+        end: top.valueSpan.end - base,
+        text: String(top.value + dy),
+      });
+    const xAttr = el.attrs.x;
+    if (xAttr && xAttr.kind === "number" && typeof xAttr.value === "number")
+      shifted.push({
+        file: el.ref.file,
+        start: xAttr.valueSpan.start - base,
+        end: xAttr.valueSpan.end - base,
+        text: String(xAttr.value + dx),
+      });
+    const yAttr = el.attrs.y;
+    if (yAttr && yAttr.kind === "number" && typeof yAttr.value === "number")
+      shifted.push({
+        file: el.ref.file,
+        start: yAttr.valueSpan.start - base,
+        end: yAttr.valueSpan.end - base,
+        text: String(yAttr.value + dy),
+      });
+    const block = applyEdits(raw, shifted);
+    const indent = lineIndentAt(code, el.ref.start);
+    const nl = code.indexOf("\n", el.ref.end);
+    if (nl === -1) {
+      return [
+        {
+          file: el.ref.file,
+          start: code.length,
+          end: code.length,
+          text: `\n${indent}${block}`,
+        },
+      ];
+    }
+    const nextLine = nl + 1;
+    return [
+      {
+        file: el.ref.file,
+        start: nextLine,
+        end: nextLine,
+        text: `${indent}${block}\n`,
+      },
+    ];
   }
 
   deleteNodes(targets: NodeRef[]): TextEdit[] {
@@ -719,6 +842,146 @@ class Planner {
       }
     }
     return edits;
+  }
+
+  groupNodes(
+    targets: NodeRef[],
+    parent: NodeRef | null,
+    pageFile: string,
+    _index: number,
+    name: string,
+  ): TextEdit[] {
+    const parentEl = parent ? this.anchor(parent) : this.pageRoot(pageFile);
+    const els = targets.map((t) => this.anchor(t));
+    for (const el of els) {
+      if (
+        el.ref.file === parentEl.ref.file &&
+        parentEl.ref.start >= el.ref.start &&
+        parentEl.ref.end <= el.ref.end
+      ) {
+        throw new Error("cannot group a target into its own subtree");
+      }
+    }
+    const files = new Set(els.map((el) => el.ref.file));
+    if (files.size > 1)
+      throw new Error("groupNodes targets must live in the same file");
+    const firstEl = els[0];
+    if (!firstEl) throw new Error("groupNodes requires at least one target");
+    const file = firstEl.ref.file;
+    const code = this.textOf(file);
+    if (parentEl.ref.file !== file)
+      throw new Error("group parent must be in the same file as targets");
+    const sorted = [...els].sort((a, b) => a.ref.start - b.ref.start);
+    let cursor = -1;
+    for (const el of sorted) {
+      if (el.ref.start < cursor)
+        throw new Error("groupNodes targets must be disjoint");
+      cursor = el.ref.end;
+    }
+    const sharedParent = (el: DesignElement): boolean =>
+      el.parent !== null &&
+      parentEl.ref.start === el.parent.ref.start &&
+      parentEl.ref.end === el.parent.ref.end;
+    for (const el of sorted) {
+      let current: DesignElement | null = el;
+      let ok = false;
+      while (current) {
+        if (sharedParent(current)) {
+          ok = true;
+          break;
+        }
+        current = current.parent;
+      }
+      if (!ok)
+        throw new Error("groupNodes targets must share the group parent");
+    }
+    const groupIndent = lineIndentAt(code, parentEl.ref.start);
+    const childIndent = `${groupIndent}  `;
+    const raw = sorted
+      .map((el) => {
+        const start = el.ref.start;
+        const end = el.ref.end;
+        const rawEl = code.slice(start, end);
+        return reindentBlock(rawEl, lineIndentAt(code, start), "");
+      })
+      .join("\n");
+    const inner = raw
+      .split("\n")
+      .map((line) => (line.length > 0 ? `${childIndent}${line}` : line))
+      .join("\n");
+    const groupBlock = `<Group data-name=${JSON.stringify(name)}>\n${inner}\n${childIndent}</Group>`;
+    const spans = sorted.map((el) => deletionSpan(code, el));
+    const merged = mergeSpans(spans);
+    const firstSpan = merged[0];
+    const lastSpan = merged[merged.length - 1];
+    const firstSorted = sorted[0];
+    const lastSorted = sorted[sorted.length - 1];
+    if (!firstSpan || !lastSpan || !firstSorted || !lastSorted)
+      throw new Error("groupNodes requires at least one target");
+    const delStart = firstSpan.start;
+    const delEnd = lastSpan.end;
+    const leading = code.slice(delStart, firstSorted.ref.start);
+    const leadingIndent = /^[ \t]*$/.test(leading) ? leading : "";
+    const trailing = code.slice(lastSorted.ref.end, delEnd);
+    const trailingWs = /^[ \t]*\r?\n?$/.test(trailing)
+      ? trailing.replace(/^[ \t]*/, "")
+      : "";
+    const text = `${leadingIndent}${groupBlock}${trailingWs}`;
+    const edits: TextEdit[] = [
+      {
+        file,
+        start: delStart,
+        end: delEnd,
+        text,
+      },
+    ];
+    const importEdit = this.ensureRuntimeImports(file, ["Group"]);
+    if (importEdit) edits.push(importEdit);
+    return edits;
+  }
+
+  ungroupNode(target: NodeRef): TextEdit[] {
+    const el = this.anchor(target);
+    const code = this.textOf(el.ref.file);
+    if (el.children.length === 0)
+      throw new Error("ungroupNode requires a Group with children");
+    const kids = el.children;
+    const first = kids[0];
+    const last = kids[kids.length - 1];
+    if (!first || !last)
+      throw new Error("ungroupNode requires a Group with children");
+    const groupIndent = lineIndentAt(code, el.ref.start);
+    const childIndent = lineIndentAt(code, first.ref.start);
+    const raw = code.slice(first.ref.start, last.ref.end);
+    const block = reindentBlock(raw, childIndent, groupIndent);
+    const span = deletionSpan(code, el);
+    const closingLine = lineStart(code, el.closingSpan?.start ?? el.ref.end);
+    const between = code.slice(
+      closingLine,
+      el.closingSpan?.start ?? el.ref.end,
+    );
+    const needsNewline = /^\n?[ \t]*$/.test(between);
+    if (!needsNewline) {
+      return [
+        { file: el.ref.file, start: span.start, end: span.end, text: block },
+      ];
+    }
+    const spanEndInclusive = (() => {
+      const end = el.ref.end;
+      if (code[end] === "\r" && code[end + 1] === "\n") return end + 2;
+      if (code[end] === "\n") return end + 1;
+      return end;
+    })();
+    void spanEndInclusive;
+    const text = `${block}\n`;
+    return [
+      {
+        file: el.ref.file,
+        start: span.start,
+        end: span.end,
+        text,
+      },
+    ];
   }
 
   reparent(
@@ -803,10 +1066,7 @@ class Planner {
     }
     const cut = selfClosingExpansionCut(destCode, parentEl);
     const parentIndent = lineIndentAt(destCode, parentEl.ref.start);
-    const insertText = `>\n${block
-      .split("\n")
-      .map((line) => `  ${line}`)
-      .join("\n")}\n${parentIndent}</${parentEl.tag}>`;
+    const insertText = `>\n${block}\n${parentIndent}</${parentEl.tag}>`;
     return [
       { file: el.ref.file, start: del.start, end: del.end, text: "" },
       {
@@ -814,6 +1074,357 @@ class Planner {
         start: cut,
         end: parentEl.openingSpan.end,
         text: insertText,
+      },
+    ];
+  }
+
+  setSharedStyle(
+    file: string,
+    start: number,
+    end: number,
+    value: string,
+  ): TextEdit[] {
+    if (file.includes("..") || file.startsWith("/") || file.includes("\\")) {
+      throw new Error("path traversal rejected");
+    }
+    const code = this.textOf(file);
+    if (start < 0 || end > code.length || start > end) {
+      throw new Error("declaration value span out of bounds");
+    }
+    return [{ file, start, end, text: value }];
+  }
+
+  private ensureRuntimeImports(
+    file: string,
+    needed: Iterable<string>,
+  ): TextEdit | null {
+    const wanted = [...new Set(needed)];
+    if (wanted.length === 0) return null;
+    const code = this.textOf(file);
+    const importPattern =
+      /import\s*\{([^}]*)\}\s*from\s*"@ombrique\/runtime";?/;
+    const match = importPattern.exec(code);
+    if (!match) {
+      return {
+        file,
+        start: 0,
+        end: 0,
+        text: `import { ${wanted.join(", ")} } from "@ombrique/runtime";\n`,
+      };
+    }
+    const existing = (match[1] ?? "")
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0);
+    const missing = wanted.filter((name) => !existing.includes(name));
+    if (missing.length === 0) return null;
+    let closing = match.index + match[0].lastIndexOf("}");
+    while (closing > 0 && /[ \t]/.test(code[closing - 1] ?? "")) closing -= 1;
+    return {
+      file,
+      start: closing,
+      end: closing,
+      text: `${existing.length > 0 ? ", " : " "}${missing.join(", ")}`,
+    };
+  }
+
+  private normalizeTokenName(name: string): string {
+    const trimmed = name.trim();
+    return trimmed.startsWith("--") ? trimmed : `--${trimmed}`;
+  }
+
+  setTokenValue(name: string, value: string): TextEdit[] {
+    const file = "tokens.css";
+    const prop = this.normalizeTokenName(name);
+    const sheet = this.index.styles.files.get(file);
+    if (!sheet) {
+      return this.createToken(name, value);
+    }
+    for (const rule of sheet.rules) {
+      for (const decl of rule.decls) {
+        if (decl.prop === prop) {
+          return [
+            {
+              file,
+              start: decl.valueSpan.start,
+              end: decl.valueSpan.end,
+              text: value,
+            },
+          ];
+        }
+      }
+    }
+    return this.createToken(name, value);
+  }
+
+  createToken(name: string, value: string): TextEdit[] {
+    const file = "tokens.css";
+    const prop = this.normalizeTokenName(name);
+    const code = this.index.sources.get(file);
+    if (code === undefined || code.trim().length === 0) {
+      const text = `:root {\n  ${prop}: ${value};\n}\n`;
+      return [{ file, start: 0, end: code ? code.length : 0, text }];
+    }
+    const sheet = this.index.styles.files.get(file);
+    const rootRule = sheet?.rules.find(
+      (r) => r.selector.trim() === ":root" || r.fullSelector.trim() === ":root",
+    );
+    if (rootRule && rootRule.decls.length > 0) {
+      const lastDecl = rootRule.decls[rootRule.decls.length - 1];
+      if (!lastDecl) throw new Error("token root rule has no declarations");
+      const insertPos = lastDecl.valueSpan.end;
+      let semiPos = insertPos;
+      while (semiPos < code.length && code[semiPos] !== ";") semiPos++;
+      if (semiPos < code.length && code[semiPos] === ";") semiPos++;
+      const text = `\n  ${prop}: ${value};`;
+      return [{ file, start: semiPos, end: semiPos, text }];
+    }
+    const rootMatch = code.indexOf(":root");
+    if (rootMatch !== -1) {
+      const openBrace = code.indexOf("{", rootMatch);
+      if (openBrace !== -1) {
+        const text = `\n  ${prop}: ${value};`;
+        return [{ file, start: openBrace + 1, end: openBrace + 1, text }];
+      }
+    }
+    const text = `\n:root {\n  ${prop}: ${value};\n}\n`;
+    return [{ file, start: code.length, end: code.length, text }];
+  }
+
+  createComponent(target: NodeRef, name: string): TextEdit[] {
+    const el = this.anchor(target);
+    const code = this.textOf(el.ref.file);
+    const componentFile = `components/${name}.tsx`;
+
+    // 1. Extract raw JSX of the target
+    const rawJsx = code.slice(el.ref.start, el.ref.end);
+
+    // 2. Determine required @ombrique/runtime primitives
+    const primitives = [
+      "Frame",
+      "Rect",
+      "Ellipse",
+      "Star",
+      "Text",
+      "Group",
+      "Image",
+    ];
+    const needed = primitives.filter((p) => {
+      const reTag = new RegExp(`<${p}\\b`);
+      return reTag.test(rawJsx);
+    });
+    const importStmt =
+      needed.length > 0
+        ? `import { ${needed.join(", ")} } from "@ombrique/runtime";\n\n`
+        : "";
+
+    // 3. Construct component file content
+    const componentContent = `${importStmt}export function ${name}() {\n  return (\n    ${rawJsx}\n  );\n}\n`;
+
+    // 4. In caller file: replace target with <Name />
+    // Also add import { Name } from "../components/Name" if not already imported
+    const importPath = el.ref.file.startsWith("pages/")
+      ? `../components/${name}`
+      : `./${name}`;
+    const importLine = `import { ${name} } from "${importPath}";\n`;
+
+    const edits: TextEdit[] = [
+      {
+        file: componentFile,
+        start: 0,
+        end: 0,
+        text: componentContent,
+      },
+    ];
+
+    if (!code.includes(importLine) && !code.includes(`import { ${name} }`)) {
+      // insert importLine at the very top of the caller file
+      edits.push({
+        file: el.ref.file,
+        start: 0,
+        end: 0,
+        text: importLine,
+      });
+    }
+
+    edits.push({
+      file: el.ref.file,
+      start: el.ref.start,
+      end: el.ref.end,
+      text: `<${name} />`,
+    });
+
+    return edits;
+  }
+
+  detachInstance(target: NodeRef): TextEdit[] {
+    const el = this.anchor(target);
+    const code = this.textOf(el.ref.file);
+    const componentName = el.tag;
+
+    // Look for component file in components/${componentName}.tsx
+    const compFile = `components/${componentName}.tsx`;
+    const compCode = this.index.sources.get(compFile);
+    if (!compCode) {
+      throw new Error(`cannot find component definition for ${componentName}`);
+    }
+
+    // Extract JSX inside return (...) of the component
+    const returnMatch = compCode.match(/return\s*\(\s*([\s\S]*?)\s*\);?\s*\}/);
+    if (!returnMatch?.[1]) {
+      throw new Error(`could not extract JSX from ${compFile}`);
+    }
+    let inlinedJsx = returnMatch[1].trim();
+
+    // Apply any override props present on the instance el.attrs
+    // For each attr on instance (excluding className/style/data-), inject/override it on root element of inlinedJsx
+    const overrideAttrs = Object.entries(el.attrs).filter(
+      ([k]) => !k.startsWith("data-") && k !== "className" && k !== "style",
+    );
+
+    if (overrideAttrs.length > 0) {
+      // Find the opening tag of inlinedJsx e.g. <Frame ...> or <Frame ... />
+      const openTagMatch = inlinedJsx.match(
+        /^<([A-Za-z0-9_]+)(\s[\s\S]*?)?(\/?>)/,
+      );
+      if (openTagMatch) {
+        let tagAttrs = openTagMatch[2] ?? "";
+        const tagCloser = openTagMatch[3] ?? ">";
+        for (const [key, attrVal] of overrideAttrs) {
+          const valStr =
+            typeof attrVal.value === "string"
+              ? `"${attrVal.value}"`
+              : `{${JSON.stringify(attrVal.value)}}`;
+          const attrPattern = new RegExp(`\\b${key}=(?:"[^"]*"|{[^}]*})`);
+          if (attrPattern.test(tagAttrs)) {
+            tagAttrs = tagAttrs.replace(attrPattern, `${key}=${valStr}`);
+          } else {
+            tagAttrs = `${tagAttrs} ${key}=${valStr}`;
+          }
+        }
+        inlinedJsx = `<${openTagMatch[1]}${tagAttrs}${tagCloser}${inlinedJsx.slice(openTagMatch[0].length)}`;
+      }
+    }
+
+    const edits: TextEdit[] = [
+      {
+        file: el.ref.file,
+        start: el.ref.start,
+        end: el.ref.end,
+        text: inlinedJsx,
+      },
+    ];
+    const primitives = new Set([
+      "Frame",
+      "Rect",
+      "Ellipse",
+      "Star",
+      "Text",
+      "Group",
+      "Image",
+      "Vector",
+      "Boolean",
+    ]);
+    const usedPrimitives: string[] = [];
+    for (const tagMatch of inlinedJsx.matchAll(/<([A-Z][A-Za-z0-9]*)/g)) {
+      const tag = tagMatch[1];
+      if (tag && primitives.has(tag)) usedPrimitives.push(tag);
+    }
+    const primitiveImport = this.ensureRuntimeImports(
+      el.ref.file,
+      usedPrimitives,
+    );
+    if (primitiveImport) edits.push(primitiveImport);
+
+    // Check if the component import should be removed if there are no other instances in the file
+    const tagUsageCount = (
+      code.match(new RegExp(`<${componentName}\\b`, "g")) ?? []
+    ).length;
+    if (tagUsageCount <= 1) {
+      // Remove import line
+      const importRegex = new RegExp(
+        `import\\s*\\{\\s*${componentName}\\s*\\}\\s*from\\s*["'][^"']+["'];?\\r?\\n?`,
+      );
+      const m = code.match(importRegex);
+      if (m && m.index !== undefined) {
+        edits.push({
+          file: el.ref.file,
+          start: m.index,
+          end: m.index + m[0].length,
+          text: "",
+        });
+      }
+    }
+
+    return edits;
+  }
+
+  flattenBoolean(target: NodeRef): TextEdit[] {
+    const el = this.anchor(target);
+    const code = this.textOf(el.ref.file);
+    const rawJsx = code.slice(el.ref.start, el.ref.end);
+
+    // Extract fill and stroke from Boolean attributes if present
+    const fillAttr = el.attrs.fill?.value ?? "#111111";
+    const strokeAttr = el.attrs.stroke?.value;
+    const strokeWidthAttr = el.attrs.strokeWidth?.value;
+
+    // Collect child SVG geometries e.g. path d, rect, circle/ellipse
+    const pathMatches = Array.from(
+      rawJsx.matchAll(/<path[^>]*\bd=(?:"([^"]*)"|\{([^}]*)\})[^>]*\/?>/gi),
+    );
+    const pathsD: string[] = [];
+    for (const m of pathMatches) {
+      const d = m[1] ?? m[2];
+      if (d) pathsD.push(d.replace(/['"]/g, "").trim());
+    }
+
+    // Also support <rect x="..." y="..." width="..." height="..." />
+    const rectMatches = Array.from(
+      rawJsx.matchAll(
+        /<rect[^>]*\bx=\{?([0-9.]+)\}?[^>]*\by=\{?([0-9.]+)\}?[^>]*\bwidth=\{?([0-9.]+)\}?[^>]*\bheight=\{?([0-9.]+)\}?[^>]*\/?>/gi,
+      ),
+    );
+    for (const m of rectMatches) {
+      const x = Number(m[1] ?? 0);
+      const y = Number(m[2] ?? 0);
+      const w = Number(m[3] ?? 0);
+      const h = Number(m[4] ?? 0);
+      pathsD.push(`M${x} ${y} h${w} v${h} h${-w} Z`);
+    }
+
+    // Also support <circle cx="..." cy="..." r="..." />
+    const circleMatches = Array.from(
+      rawJsx.matchAll(
+        /<circle[^>]*\bcx=\{?([0-9.]+)\}?[^>]*\bcy=\{?([0-9.]+)\}?[^>]*\br=\{?([0-9.]+)\}?[^>]*\/?>/gi,
+      ),
+    );
+    for (const m of circleMatches) {
+      const cx = Number(m[1] ?? 0);
+      const cy = Number(m[2] ?? 0);
+      const r = Number(m[3] ?? 0);
+      pathsD.push(
+        `M${cx - r} ${cy} a${r} ${r} 0 1 0 ${r * 2} 0 a${r} ${r} 0 1 0 ${-r * 2} 0`,
+      );
+    }
+
+    const mergedD =
+      pathsD.length > 0 ? pathsD.join(" ") : "M0 0 L100 0 L100 100 L0 100 Z";
+
+    let pathTag = `<path d="${mergedD}" fill="${fillAttr}"`;
+    if (strokeAttr) pathTag += ` stroke="${strokeAttr}"`;
+    if (strokeWidthAttr !== undefined)
+      pathTag += ` strokeWidth={${strokeWidthAttr}}`;
+    if (el.dataAttrs["data-name"])
+      pathTag += ` data-name="${el.dataAttrs["data-name"]}"`;
+    pathTag += " />";
+
+    return [
+      {
+        file: el.ref.file,
+        start: el.ref.start,
+        end: el.ref.end,
+        text: pathTag,
       },
     ];
   }
@@ -887,29 +1498,26 @@ class Planner {
   }
 
   deletePage(pageId: string): TextEdit[] {
-    const { file, text, model } = this.manifest();
-    const entry = model.entries.find((e) => e.id === pageId);
-    if (!entry) throw new Error(`page not found: ${pageId}`);
-    const start = entry.node.start;
-    const end = entry.node.end;
-    let cursor = end;
-    while (
-      cursor < text.length &&
-      (text[cursor] === " " || text[cursor] === "\t")
-    )
-      cursor++;
-    if (text[cursor] === ",") {
-      this.deletedPageFile = entry.file;
-      return [{ file, start, end: cursor + 1, text: "" }];
-    }
-    let back = start;
-    while (back > 0 && (text[back - 1] === " " || text[back - 1] === "\t"))
-      back--;
+    const { file, model } = this.manifest();
+    const itemIndex = model.entries.findIndex((e) => e.id === pageId);
+    if (itemIndex < 0) throw new Error(`page not found: ${pageId}`);
+    const entry = model.entries[itemIndex];
+    if (!entry) throw new Error("unreachable");
+    const items = model.pages.items;
+    const node = entry.node;
+    const prev = itemIndex > 0 ? items[itemIndex - 1] : undefined;
+    const next = items[itemIndex + 1];
     this.deletedPageFile = entry.file;
-    if (text[back - 1] === ",") {
-      return [{ file, start: back - 1, end, text: "" }];
+    if (prev && next) {
+      return [{ file, start: prev.end, end: node.end, text: "" }];
     }
-    return [{ file, start, end, text: "" }];
+    if (prev && !next) {
+      return [{ file, start: prev.end, end: node.end, text: "" }];
+    }
+    if (!prev && next) {
+      return [{ file, start: node.start, end: next.start, text: "" }];
+    }
+    return [{ file, start: node.start, end: node.end, text: "" }];
   }
 }
 
@@ -926,16 +1534,13 @@ function locateInParsed(
   return current;
 }
 
-export function planPatch(index: DesignIndex, command: EditCommand): PlanResult;
 export function planPatch(
   index: DesignIndex,
-  commands: EditCommand[],
-): PlanResult;
-export function planPatch(
-  index: DesignIndex,
-  input: EditCommand | EditCommand[],
+  input: EditCommand | readonly EditCommand[],
 ): PlanResult {
-  const commands = Array.isArray(input) ? input : [input];
+  const commands: readonly EditCommand[] = Array.isArray(input)
+    ? input
+    : [input];
   const planner = new Planner(index);
   for (const command of commands) {
     let edits: TextEdit[] = [];
@@ -960,6 +1565,21 @@ export function planPatch(
       case "deleteNodes":
         edits = planner.deleteNodes(command.targets);
         break;
+      case "duplicateNode":
+        edits = planner.duplicateNode(command.target, command.dx, command.dy);
+        break;
+      case "groupNodes":
+        edits = planner.groupNodes(
+          command.targets,
+          command.parent,
+          command.pageFile,
+          command.index,
+          command.name,
+        );
+        break;
+      case "ungroupNode":
+        edits = planner.ungroupNode(command.target);
+        break;
       case "reparent":
         edits = planner.reparent(
           command.target,
@@ -967,6 +1587,29 @@ export function planPatch(
           command.pageFile,
           command.index,
         );
+        break;
+      case "setSharedStyle":
+        edits = planner.setSharedStyle(
+          command.file,
+          command.start,
+          command.end,
+          command.value,
+        );
+        break;
+      case "setTokenValue":
+        edits = planner.setTokenValue(command.name, command.value);
+        break;
+      case "createToken":
+        edits = planner.createToken(command.name, command.value);
+        break;
+      case "createComponent":
+        edits = planner.createComponent(command.target, command.name);
+        break;
+      case "detachInstance":
+        edits = planner.detachInstance(command.target);
+        break;
+      case "flattenBoolean":
+        edits = planner.flattenBoolean(command.target);
         break;
       case "addPage":
         edits = planner.addPage(command.name);

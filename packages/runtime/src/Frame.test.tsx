@@ -74,4 +74,50 @@ describe("Frame", () => {
     expect(section?.style.top).toBe("20px");
     expect(section?.className).toBe("sheet");
   });
+
+  it("maps align/justify/wrap for auto-layout frames", () => {
+    const { container } = render(
+      <Frame
+        width={100}
+        height={100}
+        layout="vertical"
+        align="center"
+        justify="space-between"
+        wrap
+      />,
+    );
+    const section = container.querySelector("section");
+    expect(section?.style.alignItems).toBe("center");
+    expect(section?.style.justifyContent).toBe("space-between");
+    expect(section?.style.flexWrap).toBe("wrap");
+  });
+
+  it("maps grid layout props to display:grid", () => {
+    const { container } = render(
+      <Frame
+        width={100}
+        height={100}
+        grid={{ columns: 3, rows: 2, gap: 12, padding: 8 }}
+      />,
+    );
+    const section = container.querySelector("section");
+    expect(section?.style.display).toBe("grid");
+    expect(section?.style.gridTemplateColumns).toBe("repeat(3, 1fr)");
+    expect(section?.style.gridTemplateRows).toBe("repeat(2, 1fr)");
+    expect(section?.style.gap).toBe("12px");
+    expect(section?.style.padding).toBe("8px");
+  });
+
+  it("keeps grid and flex mutually exclusive with flex taking priority", () => {
+    const { container } = render(
+      <Frame
+        width={100}
+        height={100}
+        layout="horizontal"
+        grid={{ columns: 2 }}
+      />,
+    );
+    const section = container.querySelector("section");
+    expect(section?.style.display).toBe("flex");
+  });
 });

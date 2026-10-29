@@ -91,7 +91,7 @@ export function buildIndex(files: Record<string, string>): DesignIndex {
         elements.set(byRefKey(file, el.ref.start), el);
         byPathMap.set(byPathKey(file, el.path), el);
       }
-    } else if (file.endsWith(".scss")) {
+    } else if (file.endsWith(".scss") || file.endsWith(".css")) {
       stylesheetFiles.set(file, parseStylesheet(file, code));
     } else if (file === "ombrique.json" || file.endsWith("/ombrique.json")) {
       manifest = JSON.parse(code) as Manifest;

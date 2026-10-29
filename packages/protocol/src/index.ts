@@ -4,6 +4,7 @@ export const nodeRefSchema = z.object({
   file: z.string().min(1),
   start: z.number().int().nonnegative(),
   end: z.number().int().nonnegative(),
+  path: z.array(z.number().int().nonnegative()).optional(),
 });
 export type NodeRef = z.infer<typeof nodeRefSchema>;
 
@@ -49,10 +50,23 @@ export const textSpecSchema = z.object({
 });
 export type TextSpec = z.infer<typeof textSpecSchema>;
 
+export const imageSpecSchema = z.object({
+  kind: z.literal("image"),
+  name: z.string().min(1),
+  x: z.number(),
+  y: z.number(),
+  width: z.number().positive(),
+  height: z.number().positive(),
+  src: z.string().min(1),
+  radius: z.number().nonnegative().optional(),
+});
+export type ImageSpec = z.infer<typeof imageSpecSchema>;
+
 export const nodeSpecSchema = z.discriminatedUnion("kind", [
   frameSpecSchema,
   shapeSpecSchema,
   textSpecSchema,
+  imageSpecSchema,
 ]);
 export type NodeSpec = z.infer<typeof nodeSpecSchema>;
 
@@ -87,6 +101,12 @@ export const editCommandSchema = z.discriminatedUnion("kind", [
     targets: z.array(nodeRefSchema).min(1),
   }),
   z.object({
+    kind: z.literal("duplicateNode"),
+    target: nodeRefSchema,
+    dx: z.number(),
+    dy: z.number(),
+  }),
+  z.object({
     kind: z.literal("reparent"),
     target: nodeRefSchema,
     parent: nodeRefSchema.nullable(),
@@ -105,6 +125,48 @@ export const editCommandSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("deletePage"),
     pageId: z.string().min(1),
+  }),
+  z.object({
+    kind: z.literal("groupNodes"),
+    targets: z.array(nodeRefSchema).min(1),
+    parent: nodeRefSchema.nullable(),
+    pageFile: z.string().min(1),
+    index: z.number().int().nonnegative(),
+    name: z.string().min(1),
+  }),
+  z.object({
+    kind: z.literal("ungroupNode"),
+    target: nodeRefSchema,
+  }),
+  z.object({
+    kind: z.literal("setSharedStyle"),
+    file: z.string().min(1),
+    start: z.number().int().nonnegative(),
+    end: z.number().int().nonnegative(),
+    value: z.string(),
+  }),
+  z.object({
+    kind: z.literal("setTokenValue"),
+    name: z.string().min(1),
+    value: z.string(),
+  }),
+  z.object({
+    kind: z.literal("createToken"),
+    name: z.string().min(1),
+    value: z.string(),
+  }),
+  z.object({
+    kind: z.literal("createComponent"),
+    target: nodeRefSchema,
+    name: z.string().min(1),
+  }),
+  z.object({
+    kind: z.literal("detachInstance"),
+    target: nodeRefSchema,
+  }),
+  z.object({
+    kind: z.literal("flattenBoolean"),
+    target: nodeRefSchema,
   }),
 ]);
 export type EditCommand = z.infer<typeof editCommandSchema>;
@@ -156,6 +218,10 @@ export type AppliedTransaction = z.infer<typeof appliedTransactionSchema>;
 
 export const docToShellSchema = z.discriminatedUnion("kind", [
   z.object({
+    kind: z.literal("manifestChanged"),
+    manifest: manifestSchema,
+  }),
+  z.object({
     kind: z.literal("projectOpened"),
     root: z.string().min(1),
     manifest: manifestSchema,
@@ -179,3 +245,22 @@ export const docToShellSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 export type DocToShell = z.infer<typeof docToShellSchema>;
+
+export interface TokenItem {
+  name: string;
+  value: string;
+  file: string;
+  span: { start: number; end: number };
+}
+
+export interface SharedStyleRuleItem {
+  file: string;
+  selector: string;
+  fullSelector: string;
+  decls: Array<{
+    prop: string;
+    value: string;
+    propSpan: { start: number; end: number };
+    valueSpan: { start: number; end: number };
+  }>;
+}

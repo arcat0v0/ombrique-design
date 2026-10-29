@@ -43,6 +43,10 @@ export interface Compositor {
   readonly camera: CameraHandle;
   setBoards(boards: BoardInit[]): void;
   uploadAtScale(el: Element, scale: number): boolean;
+  exportBoard(
+    el: Element,
+    scale: number,
+  ): Promise<{ width: number; height: number; rgba: Uint8Array } | null>;
   requestPaint(): void;
   destroy(): void;
 }
@@ -146,6 +150,7 @@ export async function createCompositor(
   const gpuErrors: string[] = [];
   device.addEventListener("uncapturederror", (e) => {
     gpuErrors.push(e.error.message);
+    console.error(`[webgpu] ${e.error.message}`);
   });
 
   const context = canvas.getContext("webgpu");
@@ -238,15 +243,23 @@ export async function createCompositor(
     );
   }
 
+  function bindEntriesFor(
+    board: Board,
+    texture: GPUTexture,
+    cameraBuffer: GPUBuffer,
+  ): GPUBindGroupEntry[] {
+    return [
+      { binding: 0, resource: sampler },
+      { binding: 1, resource: texture.createView() },
+      { binding: 2, resource: { buffer: board.ubo } },
+      { binding: 3, resource: { buffer: cameraBuffer } },
+    ];
+  }
+
   function bindFor(board: Board, texture: GPUTexture): GPUBindGroup {
     return device.createBindGroup({
       layout: pipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: sampler },
-        { binding: 1, resource: texture.createView() },
-        { binding: 2, resource: { buffer: board.ubo } },
-        { binding: 3, resource: { buffer: camUbo } },
-      ],
+      entries: bindEntriesFor(board, texture, camUbo),
     });
   }
 
@@ -497,6 +510,77 @@ export async function createCompositor(
     return true;
   }
 
+  async function exportBoard(
+    el: Element,
+    scale: number,
+  ): Promise<{ width: number; height: number; rgba: Uint8Array } | null> {
+    const b = byEl.get(el);
+    if (!b || destroyed) return null;
+    uploadEl(el);
+    const maxDim = device.limits.maxTextureDimension2D;
+    const outW = Math.min(Math.max(1, Math.round(b.w * scale)), maxDim);
+    const outH = Math.min(Math.max(1, Math.round(b.h * scale)), maxDim);
+    const target = device.createTexture({
+      size: { width: outW, height: outH },
+      format: canvasFormat,
+      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC,
+    });
+    const camArr = new Float32Array(6);
+    camArr[0] = outW / b.w;
+    camArr[1] = b.x;
+    camArr[2] = b.y;
+    camArr[3] = 1;
+    camArr[4] = outW;
+    camArr[5] = outH;
+    device.queue.writeBuffer(camUbo, 0, camArr);
+    const encoder = device.createCommandEncoder();
+    const pass = encoder.beginRenderPass({
+      colorAttachments: [
+        {
+          view: target.createView(),
+          clearValue: clearColor,
+          loadOp: "clear",
+          storeOp: "store",
+        },
+      ],
+    });
+    pass.setPipeline(pipeline);
+    pass.setBindGroup(0, b.baseBind);
+    pass.draw(6);
+    pass.end();
+    const bytesPerRow = Math.ceil((outW * 4) / 256) * 256;
+    const buffer = device.createBuffer({
+      size: bytesPerRow * outH,
+      usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+    });
+    encoder.copyTextureToBuffer(
+      { texture: target },
+      { buffer, bytesPerRow },
+      { width: outW, height: outH },
+    );
+    device.queue.submit([encoder.finish()]);
+    await buffer.mapAsync(GPUMapMode.READ);
+    const src = new Uint8Array(buffer.getMappedRange());
+    const rgba = new Uint8Array(outW * outH * 4);
+    for (let y = 0; y < outH; y += 1) {
+      rgba.set(
+        src.subarray(y * bytesPerRow, y * bytesPerRow + outW * 4),
+        y * outW * 4,
+      );
+    }
+    buffer.unmap();
+    buffer.destroy();
+    target.destroy();
+    if (canvasFormat === "bgra8unorm") {
+      for (let i = 0; i < rgba.length; i += 4) {
+        const b0 = rgba[i] ?? 0;
+        rgba[i] = rgba[i + 2] ?? 0;
+        rgba[i + 2] = b0;
+      }
+    }
+    return { width: outW, height: outH, rgba };
+  }
+
   const camera: CameraHandle = {
     set(next: Camera) {
       cam = { x: next.x, y: next.y, z: next.z };
@@ -539,6 +623,7 @@ export async function createCompositor(
     camera,
     setBoards,
     uploadAtScale,
+    exportBoard,
     requestPaint() {
       canvas.requestPaint();
     },

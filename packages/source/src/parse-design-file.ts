@@ -13,7 +13,6 @@ import type {
   ElementKind,
   ParsedDesignFile,
   Span,
-  StyleProp,
   TextChild,
 } from "./types.js";
 
@@ -295,7 +294,7 @@ function buildElement(
   }
 
   const texts: TextChild[] = [];
-  const childElements: JSXElement[] = [];
+  const childElements: { jsx: JSXElement; fromExpression: boolean }[] = [];
   for (const child of jsx.children) {
     if (child.type === "JSXText") {
       texts.push({
@@ -303,20 +302,23 @@ function buildElement(
         span: { start: child.start, end: child.end },
       });
     } else if (child.type === "JSXElement") {
-      childElements.push(child);
+      childElements.push({ jsx: child, fromExpression: false });
     } else if (child.type === "JSXExpressionContainer") {
-      collectTopmostJsx(child.expression, childElements);
+      const found: JSXElement[] = [];
+      collectTopmostJsx(child.expression, found);
+      for (const jsxEl of found)
+        childElements.push({ jsx: jsxEl, fromExpression: true });
     }
   }
   element.texts = texts;
   element.textSpan = texts.length === 1 && texts[0] ? texts[0].span : null;
-  childElements.forEach((childJsx, index) => {
+  childElements.forEach((child, index) => {
     const childEl = buildElement(
       ctx,
-      childJsx,
+      child.jsx,
       [...path, index],
       element,
-      generated,
+      generated || child.fromExpression,
     );
     element.children.push(childEl);
   });
