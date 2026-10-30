@@ -47,6 +47,11 @@ export default defineConfig({
   },
   renderer: {
     root: resolve(__dirname, "src/shell"),
+    resolve: {
+      alias: {
+        "@": resolve(__dirname, "../../packages/editor-ui/src"),
+      },
+    },
     build: {
       rollupOptions: {
         input: {
