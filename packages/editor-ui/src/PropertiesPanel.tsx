@@ -1637,54 +1637,173 @@ export function PropertiesPanel({
             <Separator className="my-1" />
 
             <div className="properties-section flex flex-col gap-2">
-              {styleGroups.length === 0 ? (
-                <div className="p-2 text-center text-[11px] text-muted-foreground border border-dashed border-border rounded-md">
-                  无样式属性
-                </div>
-              ) : (
-                styleGroups.map((group) => {
-                  const isCollapsed = collapsedGroups.has(group.name);
-                  return (
-                    <div key={group.name} className="flex flex-col gap-1">
-                      <button
-                        type="button"
-                        onClick={() => toggleGroup(group.name)}
-                        className="flex items-center gap-1 px-1 text-[10px] font-medium text-muted-foreground/80 hover:text-foreground transition-colors cursor-pointer select-none"
-                        aria-expanded={!isCollapsed}
-                      >
-                        {isCollapsed ? (
-                          <ChevronRightIcon className="size-2.5" />
-                        ) : (
-                          <ChevronDownIcon className="size-2.5" />
-                        )}
-                        {group.name}
-                        <span className="font-mono text-[9px] text-muted-foreground/50">
-                          {group.rows.length}
-                        </span>
-                      </button>
-                      {!isCollapsed && (
-                        <div className="style-table flex flex-col divide-y divide-border/40 rounded-md border border-border bg-card/60">
-                          {group.rows.map((row) => (
-                            <StyleValueInput
-                              key={`${row.source}-${row.key}-${row.sourceId ?? ""}`}
-                              row={row}
-                              disabled={disabled}
-                              tokens={tokens}
-                              onCommit={(key, raw, target) =>
-                                onSetStyle(
-                                  key,
-                                  parseStyleInput(key, raw),
-                                  target,
-                                )
+              {(() => {
+                const tag = selection.tag.toLowerCase();
+                const isShape = [
+                  "rect",
+                  "ellipse",
+                  "star",
+                  "vector",
+                  "boolean",
+                  "path",
+                ].includes(tag);
+                const appearanceGroup = styleGroups.find(
+                  (g) => g.name === "Appearance 外观",
+                );
+                const otherGroups = styleGroups.filter(
+                  (g) => g.name !== "Appearance 外观",
+                );
+                return (
+                  <>
+                    {otherGroups.length === 0 &&
+                    !isShape &&
+                    !appearanceGroup ? (
+                      <div className="p-2 text-center text-[11px] text-muted-foreground border border-dashed border-border rounded-md">
+                        无样式属性
+                      </div>
+                    ) : (
+                      <>
+                        {otherGroups.map((group) => {
+                          const isCollapsed = collapsedGroups.has(group.name);
+                          return (
+                            <div
+                              key={group.name}
+                              className="flex flex-col gap-1"
+                            >
+                              <button
+                                type="button"
+                                onClick={() => toggleGroup(group.name)}
+                                className="flex items-center gap-1 px-1 text-[10px] font-medium text-muted-foreground/80 hover:text-foreground transition-colors cursor-pointer select-none"
+                                aria-expanded={!isCollapsed}
+                              >
+                                {isCollapsed ? (
+                                  <ChevronRightIcon className="size-2.5" />
+                                ) : (
+                                  <ChevronDownIcon className="size-2.5" />
+                                )}
+                                {group.name}
+                                <span className="font-mono text-[9px] text-muted-foreground/50">
+                                  {group.rows.length}
+                                </span>
+                              </button>
+                              {!isCollapsed && (
+                                <div className="style-table flex flex-col divide-y divide-border/40 rounded-md border border-border bg-card/60">
+                                  {group.rows.map((row) => (
+                                    <StyleValueInput
+                                      key={`${row.source}-${row.key}-${row.sourceId ?? ""}`}
+                                      row={row}
+                                      disabled={disabled}
+                                      tokens={tokens}
+                                      onCommit={(key, raw, target) =>
+                                        onSetStyle(
+                                          key,
+                                          parseStyleInput(key, raw),
+                                          target,
+                                        )
+                                      }
+                                    />
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                        {(isShape || appearanceGroup) && (
+                          <div className="flex flex-col gap-1">
+                            <button
+                              type="button"
+                              onClick={() => toggleGroup("Appearance 外观")}
+                              className="flex items-center gap-1 px-1 text-[10px] font-medium text-muted-foreground/80 hover:text-foreground transition-colors cursor-pointer select-none"
+                              aria-expanded={
+                                !collapsedGroups.has("Appearance 外观")
                               }
-                            />
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })
-              )}
+                            >
+                              {collapsedGroups.has("Appearance 外观") ? (
+                                <ChevronRightIcon className="size-2.5" />
+                              ) : (
+                                <ChevronDownIcon className="size-2.5" />
+                              )}
+                              Appearance 外观
+                              <span className="font-mono text-[9px] text-muted-foreground/50">
+                                {appearanceGroup?.rows.length ?? 0}
+                              </span>
+                            </button>
+                            {!collapsedGroups.has("Appearance 外观") && (
+                              <div className="style-table flex flex-col divide-y divide-border/40 rounded-md border border-border bg-card/60">
+                                {(appearanceGroup?.rows ?? []).map((row) => (
+                                  <StyleValueInput
+                                    key={`${row.source}-${row.key}-${row.sourceId ?? ""}`}
+                                    row={row}
+                                    disabled={disabled}
+                                    tokens={tokens}
+                                    onCommit={(key, raw, target) =>
+                                      onSetStyle(
+                                        key,
+                                        parseStyleInput(key, raw),
+                                        target,
+                                      )
+                                    }
+                                  />
+                                ))}
+                                {isShape && !disabled && (
+                                  <div className="flex flex-wrap gap-1 p-1.5">
+                                    {!selection.styles.some(
+                                      (s) => s.key === "fill",
+                                    ) &&
+                                      !selection.styles.some(
+                                        (s) => s.key === "background",
+                                      ) && (
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          size="xs"
+                                          className="h-5 text-[10px] px-2"
+                                          onClick={() =>
+                                            onSetStyle("fill", "#d9d9d9")
+                                          }
+                                        >
+                                          + Fill
+                                        </Button>
+                                      )}
+                                    {!selection.styles.some(
+                                      (s) => s.key === "stroke",
+                                    ) && (
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="xs"
+                                        className="h-5 text-[10px] px-2"
+                                        onClick={() =>
+                                          onSetStyle("stroke", "#000000")
+                                        }
+                                      >
+                                        + Stroke
+                                      </Button>
+                                    )}
+                                    {!selection.styles.some(
+                                      (s) => s.key === "opacity",
+                                    ) && (
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="xs"
+                                        className="h-5 text-[10px] px-2"
+                                        onClick={() => onSetStyle("opacity", 1)}
+                                      >
+                                        + Opacity
+                                      </Button>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </>
+                );
+              })()}
             </div>
 
             {selection && (

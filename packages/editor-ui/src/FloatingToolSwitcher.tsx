@@ -1,4 +1,13 @@
-import { HandIcon, MousePointer2Icon, type LucideIcon } from "lucide-react";
+import {
+  HandIcon,
+  MousePointer2Icon,
+  FrameIcon,
+  SquareIcon,
+  CircleIcon,
+  StarIcon,
+  TypeIcon,
+  type LucideIcon,
+} from "lucide-react";
 import { Kbd } from "@/components/ui/kbd";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
@@ -7,14 +16,15 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import type { CanvasTool } from "./types";
 
 export interface FloatingToolSwitcherProps {
-  activeTool: "select" | "hand";
-  onSelectTool: (tool: "select" | "hand") => void;
+  activeTool: CanvasTool;
+  onSelectTool: (tool: CanvasTool) => void;
 }
 
 const tools: Array<{
-  value: "select" | "hand";
+  value: CanvasTool;
   label: string;
   shortcut: string;
   icon: LucideIcon;
@@ -26,7 +36,14 @@ const tools: Array<{
     icon: MousePointer2Icon,
   },
   { value: "hand", label: "抓手工具", shortcut: "H", icon: HandIcon },
+  { value: "frame", label: "Frame", shortcut: "F", icon: FrameIcon },
+  { value: "rect", label: "矩形", shortcut: "R", icon: SquareIcon },
+  { value: "ellipse", label: "椭圆", shortcut: "O", icon: CircleIcon },
+  { value: "star", label: "星形", shortcut: "S", icon: StarIcon },
+  { value: "text", label: "文字", shortcut: "T", icon: TypeIcon },
 ];
+
+const VALID_TOOLS = new Set<string>(tools.map((t) => t.value));
 
 const groupStyle = {
   position: "absolute",
@@ -48,13 +65,14 @@ const groupStyle = {
 const toolStyle = {
   width: 32,
   height: 32,
-  minWidth: 32,
-  padding: 0,
-  border: 0,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
   borderRadius: 9999,
-  background: "transparent",
-  color: "var(--foreground, #f5f5f5)",
   cursor: "pointer",
+  border: "none",
+  background: "transparent",
+  color: "inherit",
 } as const;
 
 const activeToolStyle = {
@@ -68,29 +86,13 @@ const iconStyle = { width: 16, height: 16 } as const;
 const tooltipStyle = {
   display: "flex",
   alignItems: "center",
-  gap: 8,
-  padding: "6px 8px",
-  borderRadius: 6,
-  background: "var(--popover, #292929)",
-  color: "var(--popover-foreground, #f5f5f5)",
-  boxShadow: "0 4px 16px rgba(0, 0, 0, 0.3)",
+  gap: 6,
   fontSize: 12,
-  zIndex: 30,
 } as const;
 
 const kbdStyle = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  minWidth: 20,
-  height: 20,
-  padding: "0 4px",
-  borderRadius: 4,
-  background: "rgba(255, 255, 255, 0.12)",
-  color: "inherit",
-  fontFamily: "inherit",
-  fontSize: 11,
-  lineHeight: 1,
+  fontSize: 10,
+  opacity: 0.6,
 } as const;
 
 export function FloatingToolSwitcher({
@@ -103,7 +105,7 @@ export function FloatingToolSwitcher({
         type="single"
         value={activeTool}
         onValueChange={(value) => {
-          if (value === "select" || value === "hand") onSelectTool(value);
+          if (VALID_TOOLS.has(value)) onSelectTool(value as CanvasTool);
         }}
         aria-label="画布工具"
         style={groupStyle}
@@ -123,9 +125,11 @@ export function FloatingToolSwitcher({
                   <Icon style={iconStyle} />
                 </ToggleGroupItem>
               </TooltipTrigger>
-              <TooltipContent side="top" sideOffset={8} style={tooltipStyle}>
-                <span>{tool.label}</span>
-                <Kbd style={kbdStyle}>{tool.shortcut}</Kbd>
+              <TooltipContent side="top">
+                <span style={tooltipStyle}>
+                  {tool.label}
+                  <Kbd style={kbdStyle}>{tool.shortcut}</Kbd>
+                </span>
               </TooltipContent>
             </Tooltip>
           );

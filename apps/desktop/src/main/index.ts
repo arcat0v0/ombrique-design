@@ -29,7 +29,6 @@ const preloadDir = join(here, "../preload");
 
 app.commandLine.appendSwitch("enable-blink-features", "CanvasDrawElement");
 app.commandLine.appendSwitch("enable-unsafe-webgpu");
-app.commandLine.appendSwitch("enable-features", "Vulkan");
 app.commandLine.appendSwitch("use-webgpu-adapter", "vulkan");
 
 protocol.registerSchemesAsPrivileged([
@@ -534,10 +533,17 @@ ipcMain.on(
   (_event, payload: { channel: string; payload: unknown }) => {
     if (payload.channel === "ombrique:toolChanged") {
       const tool = (payload.payload as { tool?: string } | null)?.tool;
-      shellWindow?.webContents.send(
-        "ombrique:fromShellTool",
-        tool === "hand" ? "hand" : "select",
-      );
+      if (
+        tool === "select" ||
+        tool === "hand" ||
+        tool === "frame" ||
+        tool === "rect" ||
+        tool === "ellipse" ||
+        tool === "star" ||
+        tool === "text"
+      ) {
+        shellWindow?.webContents.send("ombrique:fromShellTool", tool);
+      }
       return;
     }
     shellWindow?.webContents.send(payload.channel, payload.payload);

@@ -9,6 +9,8 @@ export interface RectProps extends HTMLAttributes<HTMLDivElement> {
   height: number;
   fill: string;
   radius?: number;
+  stroke?: string;
+  strokeWidth?: number;
   opacity?: number;
 }
 
@@ -19,6 +21,8 @@ export function Rect({
   height,
   fill,
   radius,
+  stroke,
+  strokeWidth,
   opacity,
   name,
   className,
@@ -36,6 +40,10 @@ export function Rect({
         height,
         background: fill,
         borderRadius: radius,
+        border:
+          stroke === undefined
+            ? undefined
+            : `${strokeWidth ?? 1}px solid ${stroke}`,
         opacity,
         ...style,
       }}

@@ -8,7 +8,6 @@ fs.mkdirSync(path.join(OUT_DIR, "shots"), { recursive: true });
 
 app.commandLine.appendSwitch("enable-blink-features", "CanvasDrawElement");
 app.commandLine.appendSwitch("enable-unsafe-webgpu");
-app.commandLine.appendSwitch("enable-features", "Vulkan");
 app.commandLine.appendSwitch("use-webgpu-adapter", "vulkan");
 
 const isolated = [];

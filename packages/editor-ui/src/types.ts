@@ -41,6 +41,14 @@ export interface TokenItem {
   category?: string;
   description?: string;
 }
+export type CanvasTool =
+  | "select"
+  | "hand"
+  | "frame"
+  | "rect"
+  | "ellipse"
+  | "star"
+  | "text";
 
 export interface SelectionSummary {
   id: string;
@@ -81,7 +89,7 @@ export interface ShellView {
   zoom: number;
   busy: boolean;
   notice: string | null;
-  activeTool?: "select" | "hand";
+  activeTool?: CanvasTool;
   tokens?: TokenItem[];
 }
 
@@ -137,7 +145,7 @@ export interface ShellActions {
   renamePage: (pageId: string, name: string) => void;
   deletePage: (pageId: string) => void;
   dismissNotice: () => void;
-  setTool?: (tool: "select" | "hand") => void;
+  setTool?: (tool: CanvasTool) => void;
   updateCanvasBounds?: (bounds: {
     x: number;
     y: number;

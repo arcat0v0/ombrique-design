@@ -8,6 +8,8 @@ export interface EllipseProps extends HTMLAttributes<HTMLDivElement> {
   width: number;
   height: number;
   fill: string;
+  stroke?: string;
+  strokeWidth?: number;
   opacity?: number;
 }
 
@@ -17,6 +19,8 @@ export function Ellipse({
   width,
   height,
   fill,
+  stroke,
+  strokeWidth,
   opacity,
   name,
   className,
@@ -34,6 +38,10 @@ export function Ellipse({
         height,
         background: fill,
         borderRadius: "50%",
+        border:
+          stroke === undefined
+            ? undefined
+            : `${strokeWidth ?? 1}px solid ${stroke}`,
         opacity,
         ...style,
       }}

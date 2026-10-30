@@ -373,7 +373,7 @@ export default function Home() {
       '      <div data-name="Hero" style={{ position: "absolute", left: 80, top: 120, width: 400 }}>',
       "        <Text x={0} y={0} width={300} fontSize={24}>标题</Text>",
       '        <div data-name="Sub" hidden />',
-      '        <Rect data-name="Box" style={{ position: "absolute", left: 10, top: 20, width: 100, height: 50, background: "#ff0000" }} />',
+      '        <Rect data-name="Box" x={10} y={20} width={100} height={50} fill="#ff0000" />',
       "      </div>",
     ].join("\n");
     expect(next["pages/home.tsx"]).toContain(heroBlock);
@@ -439,13 +439,13 @@ export default function Home() {
     });
     const code = next["pages/home.tsx"] ?? "";
     expect(code).toContain(
-      '<Frame data-name="Wrap" style={{ position: "absolute", left: 1, top: 2, width: 3, height: 4 }} />',
+      '<Frame data-name="Wrap" x={1} y={2} width={3} height={4} fill="#d9d9d9" />',
     );
     expect(code).toContain(
-      '<Ellipse data-name="Dot" style={{ position: "absolute", left: 1, top: 2, width: 3, height: 4, background: "#00ff00" }} />',
+      '<Ellipse data-name="Dot" x={1} y={2} width={3} height={4} fill="#00ff00" />',
     );
     expect(code).toContain(
-      '<Star data-name="Spark" style={{ position: "absolute", left: 1, top: 2, width: 3, height: 4 }} />',
+      '<Star data-name="Spark" x={1} y={2} width={3} height={4} fill="#d9d9d9" />',
     );
     expect(code).toContain(
       '<Text style={{ position: "absolute", left: 1, top: 2, width: 3, fontSize: 12 }}>hello</Text>',

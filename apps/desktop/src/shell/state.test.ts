@@ -55,6 +55,16 @@ describe("shouldRouteToAttrs", () => {
     expect(shouldRouteToAttrs("gap", false, "div")).toBe(false);
     expect(shouldRouteToAttrs("layout", false, "rect")).toBe(false);
   });
+
+  it("routes new shape appearance props to setAttrs", () => {
+    for (const tag of ["Rect", "Ellipse", "Star"]) {
+      expect(shouldRouteToAttrs("fill", false, tag)).toBe(true);
+      expect(shouldRouteToAttrs("stroke", false, tag)).toBe(true);
+      expect(shouldRouteToAttrs("strokeWidth", false, tag)).toBe(true);
+      expect(shouldRouteToAttrs("opacity", false, tag)).toBe(true);
+    }
+    expect(shouldRouteToAttrs("fill", false, "div")).toBe(false);
+  });
 });
 
 describe("toSummary with sharedStyles", () => {

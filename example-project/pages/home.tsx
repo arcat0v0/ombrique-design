@@ -1,8 +1,25 @@
-import { Frame, Rect, Text } from "@ombrique/runtime";
+import { Frame, Rect, Text, Ellipse } from "@ombrique/runtime";
 
 export default function Home() {
   return (
     <Frame name="Home" x={0} y={0} width={1440} height={900} fill="#ffffff">
+      <Ellipse
+        data-name="ellipse"
+        fill="#d9d9d9"
+        style={{
+          position: "absolute",
+          left: 40,
+          top: 40,
+          width: 337,
+          height: 297,
+        }}
+      />
+      <Text style={{ position: "absolute", left: 24, top: 24, width: 240 }}>
+        Text
+      </Text>
+      <Text style={{ position: "absolute", left: 40, top: 40, width: 240 }}>
+        Text
+      </Text>
       <Rect x={0} y={0} width={1440} height={360} fill="#14141a" radius={0} />
       <Text x={96} y={96} width={720} fontSize={56} fill="#ffffff">
         Design in code

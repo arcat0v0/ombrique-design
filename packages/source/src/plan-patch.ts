@@ -74,30 +74,45 @@ function formatDeclaration(prop: string, value: string | number): string {
 }
 
 function genSpec(spec: NodeSpec): string {
-  const style = [
-    `position: "absolute"`,
-    `left: ${spec.x}`,
-    `top: ${spec.y}`,
-    `width: ${spec.width}`,
-  ];
-  if (spec.kind !== "text") style.push(`height: ${spec.height}`);
-  if (spec.kind === "text" && spec.fontSize !== undefined)
-    style.push(`fontSize: ${spec.fontSize}`);
-  if (spec.kind !== "image" && spec.fill !== undefined)
-    style.push(`background: ${JSON.stringify(spec.fill)}`);
-  const styleAttr = `style={{ ${style.join(", ")} }}`;
-  if (spec.kind === "text")
+  if (spec.kind === "text") {
+    const style = [
+      `position: "absolute"`,
+      `left: ${spec.x}`,
+      `top: ${spec.y}`,
+      `width: ${spec.width}`,
+    ];
+    if (spec.fontSize !== undefined) style.push(`fontSize: ${spec.fontSize}`);
+    if (spec.fill !== undefined)
+      style.push(`color: ${JSON.stringify(spec.fill)}`);
+    const styleAttr = `style={{ ${style.join(", ")} }}`;
     return `<Text ${styleAttr}>${escapeJsxText(spec.text)}</Text>`;
+  }
   const nameAttr = `data-name=${JSON.stringify(spec.name)}`;
   if (spec.kind === "image") {
+    const style = [
+      `position: "absolute"`,
+      `left: ${spec.x}`,
+      `top: ${spec.y}`,
+      `width: ${spec.width}`,
+      `height: ${spec.height}`,
+    ];
+    const styleAttr = `style={{ ${style.join(", ")} }}`;
     const radiusAttr =
       spec.radius !== undefined ? ` radius={${spec.radius}}` : "";
     return `<Image ${nameAttr} ${styleAttr} src=${JSON.stringify(spec.src)}${radiusAttr} />`;
   }
-  if (spec.kind === "frame") return `<Frame ${nameAttr} ${styleAttr} />`;
-  if (spec.kind === "rect") return `<Rect ${nameAttr} ${styleAttr} />`;
-  if (spec.kind === "ellipse") return `<Ellipse ${nameAttr} ${styleAttr} />`;
-  return `<Star ${nameAttr} ${styleAttr} />`;
+  const fillAttr =
+    spec.fill !== undefined
+      ? ` fill=${JSON.stringify(spec.fill)}`
+      : ` fill="#d9d9d9"`;
+  const geomAttrs = `x={${spec.x}} y={${spec.y}} width={${spec.width}} height={${spec.height}}`;
+  if (spec.kind === "frame")
+    return `<Frame ${nameAttr} ${geomAttrs}${fillAttr} />`;
+  if (spec.kind === "rect")
+    return `<Rect ${nameAttr} ${geomAttrs}${fillAttr} />`;
+  if (spec.kind === "ellipse")
+    return `<Ellipse ${nameAttr} ${geomAttrs}${fillAttr} />`;
+  return `<Star ${nameAttr} ${geomAttrs}${fillAttr} />`;
 }
 
 function deletionSpan(code: string, el: DesignElement): Span {

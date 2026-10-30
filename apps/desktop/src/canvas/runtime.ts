@@ -1,6 +1,6 @@
 import { createRoot, type Root } from "react-dom/client";
 import { createElement, type ComponentType } from "react";
-import { FloatingToolSwitcher } from "@ombrique/editor-ui";
+import { FloatingToolSwitcher, type CanvasTool } from "@ombrique/editor-ui";
 import type { Manifest } from "@ombrique/protocol";
 import {
   createCompositor,
@@ -37,7 +37,12 @@ interface SelectedNode {
   element: Element;
 }
 
-type DragMode = "none" | "pan" | "move" | "scale";
+type DragMode = "none" | "pan" | "move" | "scale" | "create";
+type CreateTool = Exclude<CanvasTool, "select" | "hand">;
+
+function isCreateTool(tool: CanvasTool): tool is CreateTool {
+  return tool !== "select" && tool !== "hand";
+}
 type HandleId = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
 
 const HANDLES: Array<{ id: HandleId; x: number; y: number; cursor: string }> = [
@@ -73,10 +78,12 @@ let compositor: Compositor | null = null;
 let selection: SelectedNode | null = null;
 let multiSelection: SelectedNode[] = [];
 let marquee: { x0: number; y0: number; x1: number; y1: number } | null = null;
+let createPreview: { x0: number; y0: number; x1: number; y1: number } | null =
+  null;
 let currentFile: string | null = null;
 let firstMount = true;
 let spacePressed = false;
-let toolMode: "select" | "hand" = "select";
+let toolMode: CanvasTool = "select";
 let editingText: HTMLElement | null = null;
 let editingOriginal = "";
 const nodeProps = new Map<
@@ -185,29 +192,57 @@ async function importPage(
   return module.default ?? null;
 }
 
-function refreshSelectionRect(): void {
-  const nodes =
-    multiSelection.length > 0 ? multiSelection : selection ? [selection] : [];
-  for (const node of nodes) {
-    const bounds = node.element.getBoundingClientRect();
-    node.rect = {
+function boardWorldOrigin(element: Element): { x: number; y: number } {
+  const board = element.closest<HTMLElement>(".board");
+  if (!board) return { x: 0, y: 0 };
+  const file = board.dataset.file;
+  const boardEntry = file ? boards.get(file) : undefined;
+  if (!boardEntry) return { x: 0, y: 0 };
+  let x = 0;
+  for (const [, entry] of boards) {
+    if (entry === boardEntry) return { x, y: 0 };
+    x += entry.element.offsetWidth + 60;
+  }
+  return { x: 0, y: 0 };
+}
+
+function worldRectOf(element: Element): {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+} {
+  const bounds = element.getBoundingClientRect();
+  const board = element.closest<HTMLElement>(".board");
+  if (!board) {
+    return {
       x: bounds.left / camera.z + camera.x,
       y: bounds.top / camera.z + camera.y,
       width: bounds.width / camera.z,
       height: bounds.height / camera.z,
     };
   }
+  const boardBounds = board.getBoundingClientRect();
+  const origin = boardWorldOrigin(element);
+  return {
+    x: origin.x + (bounds.left - boardBounds.left),
+    y: origin.y + (bounds.top - boardBounds.top),
+    width: bounds.width,
+    height: bounds.height,
+  };
+}
+
+function refreshSelectionRect(): void {
+  const nodes =
+    multiSelection.length > 0 ? multiSelection : selection ? [selection] : [];
+  for (const node of nodes) {
+    node.rect = worldRectOf(node.element);
+  }
 }
 
 function refreshRectsOf(nodes: SelectedNode[]): void {
   for (const node of nodes) {
-    const bounds = node.element.getBoundingClientRect();
-    node.rect = {
-      x: bounds.left / camera.z + camera.x,
-      y: bounds.top / camera.z + camera.y,
-      width: bounds.width / camera.z,
-      height: bounds.height / camera.z,
-    };
+    node.rect = worldRectOf(node.element);
   }
 }
 
@@ -367,6 +402,18 @@ function drawOverlay() {
     band.style.height = `${Math.abs(marquee.y1 - marquee.y0) * camera.z}px`;
     overlay.appendChild(band);
   }
+  if (createPreview) {
+    const band = document.createElement("div");
+    band.className = "marquee-band";
+    band.style.position = "absolute";
+    band.style.border = "1px solid #4c8dff";
+    band.style.backgroundColor = "rgba(76, 141, 255, 0.12)";
+    band.style.left = `${(Math.min(createPreview.x0, createPreview.x1) - camera.x) * camera.z}px`;
+    band.style.top = `${(Math.min(createPreview.y0, createPreview.y1) - camera.y) * camera.z}px`;
+    band.style.width = `${Math.abs(createPreview.x1 - createPreview.x0) * camera.z}px`;
+    band.style.height = `${Math.abs(createPreview.y1 - createPreview.y0) * camera.z}px`;
+    overlay.appendChild(band);
+  }
 }
 
 function isSelectableElement(element: Element, board: HTMLElement): boolean {
@@ -385,18 +432,20 @@ function isSelectableElement(element: Element, board: HTMLElement): boolean {
 }
 
 function hitTest(clientX: number, clientY: number): SelectedNode | null {
+  const wx = clientX / camera.z + camera.x;
+  const wy = clientY / camera.z + camera.y;
   for (const [element, info] of [...nodeIndex].reverse()) {
     const board = element.closest<HTMLElement>(".board");
     if (!board || !isSelectableElement(element, board)) continue;
-    const bounds = element.getBoundingClientRect();
+    const rect = worldRectOf(element);
     if (
-      bounds.width === 0 ||
-      bounds.height === 0 ||
+      rect.width === 0 ||
+      rect.height === 0 ||
       !(
-        clientX >= bounds.left &&
-        clientX <= bounds.right &&
-        clientY >= bounds.top &&
-        clientY <= bounds.bottom
+        wx >= rect.x &&
+        wx <= rect.x + rect.width &&
+        wy >= rect.y &&
+        wy <= rect.y + rect.height
       )
     ) {
       continue;
@@ -406,12 +455,7 @@ function hitTest(clientX: number, clientY: number): SelectedNode | null {
       path: info.path,
       tag: element.tagName.toLowerCase(),
       name: element.getAttribute("data-name"),
-      rect: {
-        x: bounds.left / camera.z + camera.x,
-        y: bounds.top / camera.z + camera.y,
-        width: bounds.width / camera.z,
-        height: bounds.height / camera.z,
-      },
+      rect,
       element,
     };
   }
@@ -443,18 +487,12 @@ function selectionElementOf(file: string, path: number[]): SelectedNode | null {
   for (const [element, info] of nodeIndex) {
     if (info.file !== file) continue;
     if (info.path.join("/") !== path.join("/")) continue;
-    const bounds = element.getBoundingClientRect();
     return {
       file: info.file,
       path: info.path,
       tag: element.tagName.toLowerCase(),
       name: element.getAttribute("data-name"),
-      rect: {
-        x: bounds.left / camera.z + camera.x,
-        y: bounds.top / camera.z + camera.y,
-        width: bounds.width / camera.z,
-        height: bounds.height / camera.z,
-      },
+      rect: worldRectOf(element),
       element,
     };
   }
@@ -466,23 +504,23 @@ function commitMove(node: SelectedNode, dx: number, dy: number): void {
   const flags = flagsOf(node);
   const usesAttrsX = flags.attrs.includes("x") && flags.attrs.includes("y");
   const target = { file: node.file, start: 0, end: 0, path: node.path };
+  const boardOrigin = boardWorldOrigin(node.element);
+  const x = Math.round(node.rect.x + dx - boardOrigin.x);
+  const y = Math.round(node.rect.y + dy - boardOrigin.y);
   const commands: unknown[] = [];
   if (usesAttrsX) {
     commands.push({
       kind: "setAttrs",
       target,
-      attrs: {
-        x: Math.round(node.rect.x + dx),
-        y: Math.round(node.rect.y + dy),
-      },
+      attrs: { x, y },
     });
   } else {
     commands.push({
       kind: "setStyle",
       target,
       declarations: [
-        ["left", Math.round(node.rect.x + dx)],
-        ["top", Math.round(node.rect.y + dy)],
+        ["left", x],
+        ["top", y],
       ],
     });
   }
@@ -520,13 +558,12 @@ function commitScale(
   const attrsW =
     flags.attrs.includes("width") && flags.attrs.includes("height");
   const target = { file: node.file, start: 0, end: 0, path: node.path };
+  const boardOrigin = boardWorldOrigin(node.element);
   const commands: unknown[] = [];
   if (usesAttrsX) {
     const patch: Record<string, number> = {};
-    if (movesX) {
-      patch.x = Math.round(x);
-      patch.y = Math.round(y);
-    }
+    if (movesX) patch.x = Math.round(x - boardOrigin.x);
+    if (movesY) patch.y = Math.round(y - boardOrigin.y);
     if (attrsW) {
       patch.width = Math.round(width);
       patch.height = Math.round(height);
@@ -536,10 +573,8 @@ function commitScale(
     }
   } else {
     const declarations: Array<[string, number]> = [];
-    if (movesX) {
-      declarations.push(["left", Math.round(x)]);
-      declarations.push(["top", Math.round(y)]);
-    }
+    if (movesX) declarations.push(["left", Math.round(x - boardOrigin.x)]);
+    if (movesY) declarations.push(["top", Math.round(y - boardOrigin.y)]);
     declarations.push(["width", Math.round(width)]);
     if (height !== originRect.height || movesY) {
       declarations.push(["height", Math.round(height)]);
@@ -559,22 +594,22 @@ function commitMultiMove(dx: number, dy: number): void {
   for (const node of nodes) {
     const flags = flagsOf(node);
     const target = { file: node.file, start: 0, end: 0, path: node.path };
+    const boardOrigin = boardWorldOrigin(node.element);
+    const x = Math.round(node.rect.x + dx - boardOrigin.x);
+    const y = Math.round(node.rect.y + dy - boardOrigin.y);
     if (flags.attrs.includes("x") && flags.attrs.includes("y")) {
       commands.push({
         kind: "setAttrs",
         target,
-        attrs: {
-          x: Math.round(node.rect.x + dx),
-          y: Math.round(node.rect.y + dy),
-        },
+        attrs: { x, y },
       });
     } else {
       commands.push({
         kind: "setStyle",
         target,
         declarations: [
-          ["left", Math.round(node.rect.x + dx)],
-          ["top", Math.round(node.rect.y + dy)],
+          ["left", x],
+          ["top", y],
         ],
       });
     }
@@ -587,9 +622,10 @@ function previewMove(dx: number, dy: number): void {
   const nodes = multiSelection.length > 1 ? multiSelection : [selection];
   for (const node of nodes) {
     const element = node.element as HTMLElement;
+    const origin = boardWorldOrigin(node.element);
     element.style.position = "absolute";
-    element.style.left = `${node.rect.x + dx}px`;
-    element.style.top = `${node.rect.y + dy}px`;
+    element.style.left = `${node.rect.x + dx - origin.x}px`;
+    element.style.top = `${node.rect.y + dy - origin.y}px`;
   }
   refreshRectsOf(nodes);
   drawOverlay();
@@ -619,9 +655,10 @@ function previewScale(
   width = Math.max(1, width);
   height = Math.max(1, height);
   const element = selection.element as HTMLElement;
+  const origin = boardWorldOrigin(selection.element);
   element.style.position = "absolute";
-  element.style.left = `${x}px`;
-  element.style.top = `${y}px`;
+  element.style.left = `${x - origin.x}px`;
+  element.style.top = `${y - origin.y}px`;
   element.style.width = `${width}px`;
   element.style.height = `${height}px`;
   selection.rect = { x, y, width, height };
@@ -632,9 +669,10 @@ function nudge(dx: number, dy: number): void {
   if (multiSelection.length === 0) return;
   for (const node of multiSelection) {
     const element = node.element as HTMLElement;
+    const origin = boardWorldOrigin(node.element);
     element.style.position = "absolute";
-    element.style.left = `${node.rect.x + dx}px`;
-    element.style.top = `${node.rect.y + dy}px`;
+    element.style.left = `${node.rect.x + dx - origin.x}px`;
+    element.style.top = `${node.rect.y + dy - origin.y}px`;
   }
   refreshRectsOf(multiSelection);
   commitMultiMove(dx, dy);
@@ -908,33 +946,40 @@ async function init() {
     toolRoot2.render(
       createElement(FloatingToolSwitcher, {
         activeTool: toolMode,
-        onSelectTool: (tool: "select" | "hand") => {
-          toolMode = tool;
-          bridge?.send("ombrique:toolChanged", { tool });
-          renderToolSwitcher();
-        },
+        onSelectTool: activateTool,
       }),
     );
+  };
+  const activateTool = (tool: CanvasTool) => {
+    toolMode = tool;
+    bridge?.send("ombrique:toolChanged", { tool });
+    renderToolSwitcher();
   };
   renderToolSwitcher();
 
   window.addEventListener("keydown", (event) => {
     if (editingText) return;
     const mod = event.metaKey || event.ctrlKey;
-    if (event.key === "v" || event.key === "V") {
-      if (mod) return;
-      toolMode = "select";
-      renderToolSwitcher();
-      return;
-    }
-    if (event.key === "h" || event.key === "H") {
-      if (mod) return;
-      toolMode = "hand";
-      renderToolSwitcher();
-      return;
+    if (!mod) {
+      const shortcuts: Record<string, CanvasTool> = {
+        v: "select",
+        h: "hand",
+        f: "frame",
+        r: "rect",
+        o: "ellipse",
+        s: "star",
+        t: "text",
+      };
+      const tool = shortcuts[event.key.toLowerCase()];
+      if (tool) {
+        event.preventDefault();
+        activateTool(tool);
+        return;
+      }
     }
     if (event.key === "Escape") {
-      toolMode = "select";
+      createPreview = null;
+      activateTool("select");
       selectSingle(null);
       return;
     }
@@ -1004,6 +1049,19 @@ async function init() {
       drag.moved = false;
       return;
     }
+    if (isCreateTool(toolMode)) {
+      const board = currentFile ? boards.get(currentFile) : undefined;
+      if (!board) return;
+      const wx = event.clientX / camera.z + camera.x;
+      const wy = event.clientY / camera.z + camera.y;
+      drag.mode = "create";
+      drag.x = event.clientX;
+      drag.y = event.clientY;
+      drag.moved = false;
+      createPreview = { x0: wx, y0: wy, x1: wx, y1: wy };
+      selectSingle(null);
+      return;
+    }
     const handle = handleAtPoint(event.clientX, event.clientY);
     if (
       handle &&
@@ -1058,6 +1116,12 @@ async function init() {
     const dx = event.clientX - drag.x;
     const dy = event.clientY - drag.y;
     if (Math.abs(dx) + Math.abs(dy) > 0) drag.moved = true;
+    if (drag.mode === "create" && createPreview) {
+      createPreview.x1 = event.clientX / camera.z + camera.x;
+      createPreview.y1 = event.clientY / camera.z + camera.y;
+      drawOverlay();
+      return;
+    }
     if (marquee) {
       const wx = event.clientX / camera.z + camera.x;
       const wy = event.clientY / camera.z + camera.y;
@@ -1089,6 +1153,44 @@ async function init() {
     const dx = (event.clientX - drag.x) / camera.z;
     const dy = (event.clientY - drag.y) / camera.z;
     const origin = drag.originRect;
+    if (createPreview) {
+      const preview = createPreview;
+      createPreview = null;
+      const kind = toolMode;
+      const board = currentFile ? boards.get(currentFile) : undefined;
+      if (board && currentFile && isCreateTool(kind)) {
+        const boardOrigin = boardWorldOrigin(board.element);
+        const rawWidth = Math.abs(preview.x1 - preview.x0);
+        const rawHeight = Math.abs(preview.y1 - preview.y0);
+        const isClick = rawWidth < 4 && rawHeight < 4;
+        const x = Math.round(Math.min(preview.x0, preview.x1) - boardOrigin.x);
+        const y = Math.round(Math.min(preview.y0, preview.y1) - boardOrigin.y);
+        const width = Math.max(
+          1,
+          Math.round(isClick ? (kind === "text" ? 240 : 100) : rawWidth),
+        );
+        const height = Math.max(
+          1,
+          Math.round(isClick ? (kind === "frame" ? 180 : 100) : rawHeight),
+        );
+        const spec =
+          kind === "text"
+            ? { kind, text: "Text", x, y, width, fill: "#14141a" }
+            : { kind, name: kind, x, y, width, height, fill: "#d9d9d9" };
+        bridge?.send("ombrique:canvasEdit", {
+          commands: [
+            {
+              kind: "createNodes",
+              parent: null,
+              pageFile: currentFile,
+              index: 0,
+              specs: [spec],
+            },
+          ],
+        });
+      }
+      activateTool("select");
+    }
     if (marquee) {
       const mx = Math.min(marquee.x0, marquee.x1);
       const my = Math.min(marquee.y0, marquee.y1);
@@ -1100,13 +1202,7 @@ async function init() {
         const found: SelectedNode[] = [];
         for (const [element, info] of nodeIndex) {
           if (element.tagName.toLowerCase() === "section") continue;
-          const b = element.getBoundingClientRect();
-          const eRect = {
-            x: b.left / camera.z + camera.x,
-            y: b.top / camera.z + camera.y,
-            width: b.width / camera.z,
-            height: b.height / camera.z,
-          };
+          const eRect = worldRectOf(element);
           if (
             eRect.x < mRect.x + mRect.width &&
             eRect.x + eRect.width > mRect.x &&
@@ -1161,6 +1257,7 @@ async function init() {
     drag.originRect = null;
     drag.moved = false;
     marquee = null;
+    createPreview = null;
     drawOverlay();
   });
   host.addEventListener(
@@ -1368,8 +1465,19 @@ async function init() {
       return;
     }
     if (command?.channel === "ombrique:toolChanged") {
-      const tool = command.payload as "select" | "hand" | null;
-      if (tool === "select" || tool === "hand") toolMode = tool;
+      const tool = command.payload as CanvasTool | null;
+      if (
+        tool === "select" ||
+        tool === "hand" ||
+        tool === "frame" ||
+        tool === "rect" ||
+        tool === "ellipse" ||
+        tool === "star" ||
+        tool === "text"
+      ) {
+        toolMode = tool;
+        renderToolSwitcher();
+      }
       return;
     }
     if (command?.channel === "ombrique:selectNode") {

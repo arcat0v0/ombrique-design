@@ -6,6 +6,7 @@ export { TokensPanel } from "./TokensPanel";
 export type { TokensPanelProps } from "./TokensPanel";
 export { parseStyleInput } from "./parseStyleInput";
 export type {
+  CanvasTool,
   CanvasStats,
   LayerNode,
   PageTab,

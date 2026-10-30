@@ -1,3 +1,4 @@
+import type { CanvasTool } from "@ombrique/editor-ui";
 import { contextBridge, ipcRenderer } from "electron";
 
 contextBridge.exposeInMainWorld("ombriqueShell", {
@@ -90,14 +91,14 @@ contextBridge.exposeInMainWorld("ombriqueShell", {
       channel: "ombrique:resolvedProps",
       payload: { file, path, ...info },
     }),
-  sendToolChanged: (tool: "select" | "hand") =>
+  sendToolChanged: (tool: CanvasTool) =>
     ipcRenderer.send("ombrique:toCanvas", {
       channel: "ombrique:toolChanged",
       payload: tool,
     }),
-  onToolChanged: (cb: (tool: "select" | "hand") => void) => {
-    ipcRenderer.on("ombrique:fromShellTool", (_event, tool) =>
-      cb(tool === "hand" ? "hand" : "select"),
+  onToolChanged: (cb: (tool: CanvasTool) => void) => {
+    ipcRenderer.on("ombrique:fromShellTool", (_event, tool: CanvasTool) =>
+      cb(tool),
     );
   },
   onClipboardEdit: (cb: (payload: unknown) => void) => {

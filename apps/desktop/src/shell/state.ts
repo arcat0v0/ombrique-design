@@ -1,4 +1,5 @@
 import type {
+  CanvasTool,
   CanvasStats,
   LayerNode,
   SelectionSummary,
@@ -161,7 +162,7 @@ export interface ShellBridge {
   openBundle?: () => Promise<{ ok: boolean; root?: string }>;
   selectPage: (pageId: string) => void;
   selectLayer?: (file: string, path: number[]) => void;
-  sendToolChanged?: (tool: "select" | "hand") => void;
+  sendToolChanged?: (tool: CanvasTool) => void;
   updateCanvasBounds?: (bounds: {
     x: number;
     y: number;
@@ -169,7 +170,7 @@ export interface ShellBridge {
     height: number;
   }) => void;
   reloadCanvas?: () => Promise<boolean>;
-  onToolChanged?: (cb: (tool: "select" | "hand") => void) => void;
+  onToolChanged?: (cb: (tool: CanvasTool) => void) => void;
   minimizeWindow?: () => void;
   toggleWindowMaximize?: () => void;
   closeWindow?: () => void;
@@ -209,6 +210,13 @@ export const FRAME_LAYOUT_PROPS: ReadonlySet<string> = new Set([
   "grid",
 ]);
 
+export const SHAPE_APPEARANCE_PROPS: Record<string, true> = {
+  fill: true,
+  stroke: true,
+  strokeWidth: true,
+  opacity: true,
+};
+
 export function shouldRouteToAttrs(
   key: string,
   isProp: boolean,
@@ -216,6 +224,8 @@ export function shouldRouteToAttrs(
 ): boolean {
   if (isProp) return true;
   const t = tag.toLowerCase();
+  const isShape = t === "rect" || t === "ellipse" || t === "star";
+  if (isShape && SHAPE_APPEARANCE_PROPS[key]) return true;
   const isFrameLike = t === "frame" || t === "section" || t === "group";
   return isFrameLike && FRAME_LAYOUT_PROPS.has(key);
 }
@@ -800,6 +810,7 @@ export function createShellState() {
               y,
               width: kind === "frame" ? 480 : 160,
               height: kind === "frame" ? 320 : 160,
+              fill: "#d9d9d9",
             };
       void sendCommands([
         {

@@ -21,6 +21,36 @@ describe("PropertiesPanel", () => {
     expect(queryByLabelText("名称")).toBeNull();
   });
 
+  it("shows editable appearance controls for an ellipse without fill styles", () => {
+    const onSetStyle = vi.fn();
+    const selection = makeSelection({
+      tag: "Ellipse",
+      styles: [
+        { key: "x", value: "40", source: "inline", readOnly: false },
+        { key: "y", value: "40", source: "inline", readOnly: false },
+        { key: "width", value: "160", source: "inline", readOnly: false },
+        { key: "height", value: "160", source: "inline", readOnly: false },
+      ],
+    });
+    const { getByText } = render(
+      <PropertiesPanel
+        selection={selection}
+        onSetStyle={onSetStyle}
+        onSetText={() => {}}
+        onSetName={() => {}}
+        onToggleHidden={() => {}}
+        onToggleLocked={() => {}}
+      />,
+    );
+    expect(getByText("Appearance 外观")).toBeDefined();
+    fireEvent.click(getByText("+ Fill"));
+    expect(onSetStyle).toHaveBeenCalledWith("fill", "#d9d9d9");
+    fireEvent.click(getByText("+ Stroke"));
+    expect(onSetStyle).toHaveBeenCalledWith("stroke", "#000000");
+    fireEvent.click(getByText("+ Opacity"));
+    expect(onSetStyle).toHaveBeenCalledWith("opacity", 1);
+  });
+
   it("shows read-only reason and disables inputs when selection is not editable", () => {
     const selection = makeSelection({
       editable: false,

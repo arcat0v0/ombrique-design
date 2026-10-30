@@ -39,6 +39,29 @@ describe("FloatingToolSwitcher", () => {
     expect(onSelectTool).toHaveBeenCalledTimes(2);
   });
 
+  it("selects creation tools and highlights the active shape", () => {
+    const onSelectTool = vi.fn();
+    const { getByRole, rerender } = render(
+      <FloatingToolSwitcher activeTool="select" onSelectTool={onSelectTool} />,
+    );
+    for (const [name, tool] of [
+      ["Frame", "frame"],
+      ["矩形", "rect"],
+      ["椭圆", "ellipse"],
+      ["星形", "star"],
+      ["文字", "text"],
+    ] as const) {
+      getByRole("radio", { name }).click();
+      expect(onSelectTool).toHaveBeenCalledWith(tool);
+    }
+    rerender(
+      <FloatingToolSwitcher activeTool="ellipse" onSelectTool={onSelectTool} />,
+    );
+    expect(
+      getByRole("radio", { name: "椭圆" }).getAttribute("aria-checked"),
+    ).toBe("true");
+  });
+
   it("shows actual keyboard shortcuts as kbd hints", async () => {
     const onSelectTool = vi.fn();
     const { findByText, getByRole } = render(
