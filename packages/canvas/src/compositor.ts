@@ -2,6 +2,7 @@ import { intersects, visibleRect, zoomAt as cameraZoomAt } from "./camera";
 import type { Camera } from "./camera";
 import { UploadQueue } from "./uploadQueue";
 import { resolveElementImageUpload } from "./element-upload";
+import { fitTextureSize } from "./texture-size";
 
 export interface BoardInit {
   el: Element;
@@ -44,6 +45,7 @@ export interface Compositor {
   readonly camera: CameraHandle;
   setBoards(boards: BoardInit[]): void;
   uploadAtScale(el: Element, scale: number): boolean;
+  setInteractive(active: boolean): void;
   exportBoard(
     el: Element,
     scale: number,
@@ -125,6 +127,13 @@ interface Board {
   texH: number;
   bind: GPUBindGroup;
   hiRes: HiResEntry | null;
+  desiredScale: number;
+  pendingScale: number | null;
+  pendingSince: number;
+  verifyEntry: HiResEntry | null;
+  baseReady: boolean;
+  zoomCaptureAt: number | null;
+  captureZoomPrev: string;
 }
 
 function nextFrame(): Promise<void> {
@@ -156,6 +165,14 @@ export async function createCompositor(
     console.error(`[webgpu] ${e.error.message}`);
   });
   const uploadElementImage = resolveElementImageUpload(device.queue);
+  const copyElementImage =
+    typeof device.queue.copyElementImageToTexture === "function"
+      ? device.queue.copyElementImageToTexture.bind(device.queue)
+      : null;
+  const captureElementImage =
+    typeof canvas.captureElementImage === "function"
+      ? canvas.captureElementImage.bind(canvas)
+      : null;
 
   const context = canvas.getContext("webgpu");
   if (!context) throw new Error("webgpu canvas context unavailable");
@@ -199,7 +216,9 @@ export async function createCompositor(
   let uploadsTotal = 0;
   let paintsTotal = 0;
   let hiResBytes = 0;
+  let interactive = false;
   const maxTextureBytes = opts.maxTextureBytes ?? 512 * 1024 * 1024;
+  const maxHiResPixels = 16 * 1024 * 1024;
   const minZoom = opts.minZoom ?? 0.05;
   const maxZoom = opts.maxZoom ?? 32;
   const clearColor = opts.clearColor ?? { r: 0.063, g: 0.063, b: 0.078, a: 1 };
@@ -288,10 +307,263 @@ export async function createCompositor(
     b.texW = b.baseTexW;
     b.texH = b.baseTexH;
     b.bind = b.baseBind;
+    if (!b.baseReady) queue.markDirty(b.el);
+  }
+
+  function targetTextureSize(
+    b: Board,
+    scale: number,
+  ): { width: number; height: number } {
+    return fitTextureSize(
+      b.w,
+      b.h,
+      scale,
+      device.limits.maxTextureDimension2D,
+      maxHiResPixels,
+    );
+  }
+
+  function scheduleScale(b: Board): void {
+    if (interactive) return;
+    const scale = b.desiredScale;
+    const size = targetTextureSize(b, scale);
+    if (scale <= 1 || (size.width <= b.baseTexW && size.height <= b.baseTexH)) {
+      b.pendingScale = null;
+      restoreBase(b);
+      return;
+    }
+    if (
+      b.hiRes &&
+      b.hiRes.texW === size.width &&
+      b.hiRes.texH === size.height
+    ) {
+      b.hiRes.lastUsed = frameNo;
+      b.pendingScale = null;
+      return;
+    }
+    b.pendingScale = scale;
+    b.pendingSince = frameNo;
+    canvas.requestPaint();
+  }
+
+  function applyPendingScale(b: Board): void {
+    const scale = b.pendingScale;
+    if (scale === null) return;
+    if (b.el.parentElement !== canvas) {
+      b.pendingScale = null;
+      releaseCaptureZoom(b);
+      return;
+    }
+    const size = targetTextureSize(b, scale);
+    if (size.width <= b.baseTexW && size.height <= b.baseTexH) {
+      b.pendingScale = null;
+      releaseCaptureZoom(b);
+      restoreBase(b);
+      return;
+    }
+    if (!b.baseReady) {
+      uploadElementImage(
+        { source: b.el },
+        { texture: b.baseTex, size: { width: b.baseTexW, height: b.baseTexH } },
+      );
+      b.baseReady = true;
+    }
+    if (b.zoomCaptureAt !== null) {
+      if (frameNo <= b.zoomCaptureAt) return;
+      b.pendingScale = null;
+      if (!finishZoomCapture(b)) captureBoardImage(b, size);
+      if (b.desiredScale !== scale) scheduleScale(b);
+      return;
+    }
+    if (canCaptureAtZoom(b, size)) {
+      beginCaptureZoom(b, size);
+      return;
+    }
+    b.pendingScale = null;
+    captureBoardImage(b, size);
+    if (b.desiredScale !== scale) scheduleScale(b);
+  }
+
+  function canCaptureAtZoom(
+    b: Board,
+    size: { width: number; height: number },
+  ): boolean {
+    if (!captureElementImage || !copyElementImage) return false;
+    if (!(b.el instanceof HTMLElement)) return false;
+    return size.width / Math.max(1, b.baseTexW) > 1.02;
+  }
+
+  function beginCaptureZoom(
+    b: Board,
+    size: { width: number; height: number },
+  ): void {
+    const el = b.el as HTMLElement;
+    b.captureZoomPrev = el.style.zoom;
+    el.style.zoom = String(size.width / Math.max(1, b.baseTexW));
+    b.zoomCaptureAt = frameNo;
+  }
+
+  function releaseCaptureZoom(b: Board): void {
+    if (b.zoomCaptureAt === null) return;
+    if (b.el instanceof HTMLElement) b.el.style.zoom = b.captureZoomPrev;
+    b.zoomCaptureAt = null;
+  }
+
+  function finishZoomCapture(b: Board): boolean {
+    if (b.zoomCaptureAt === null) return false;
+    let image: ElementImage | null = null;
+    try {
+      if (b.el.parentElement !== canvas) {
+        releaseCaptureZoom(b);
+        return false;
+      }
+      image = captureElementImage?.(b.el) ?? null;
+    } catch {
+      image = null;
+    } finally {
+      releaseCaptureZoom(b);
+    }
+    if (!image || image.width < 1 || image.height < 1) {
+      image?.close?.();
+      return false;
+    }
+    const width = Math.round(image.width);
+    const height = Math.round(image.height);
+    if (!b.baseReady) {
+      uploadElementImage(
+        { source: b.el },
+        { texture: b.baseTex, size: { width: b.baseTexW, height: b.baseTexH } },
+      );
+      b.baseReady = true;
+    }
+    if (b.hiRes) restoreBase(b);
+    const tex = createBoardTexture(width, height);
+    try {
+      copyElementImage?.({ source: image }, { destination: { texture: tex } });
+    } catch {
+      tex.destroy();
+      image.close?.();
+      return false;
+    }
+    image.close?.();
+    installHiRes(b, tex, width, height);
+    return true;
+  }
+
+  function captureBoardImage(
+    b: Board,
+    size: { width: number; height: number },
+  ): void {
+    if (b.hiRes) restoreBase(b);
+    const tex = createBoardTexture(size.width, size.height);
+    try {
+      uploadElementImage(
+        { source: b.el },
+        { texture: tex, size: { width: size.width, height: size.height } },
+      );
+    } catch {
+      tex.destroy();
+      return;
+    }
+    installHiRes(b, tex, size.width, size.height);
+  }
+
+  function installHiRes(
+    b: Board,
+    tex: GPUTexture,
+    width: number,
+    height: number,
+  ): void {
+    const bytes = width * height * 4;
+    const bind = bindFor(b, tex);
+    const entry: HiResEntry = {
+      tex,
+      texW: width,
+      texH: height,
+      bind,
+      bytes,
+      lastUsed: frameNo,
+    };
+    b.hiRes = entry;
+    b.tex = tex;
+    b.texW = width;
+    b.texH = height;
+    b.bind = bind;
+    b.verifyEntry = entry;
+    hiResBytes += bytes;
+    while (hiResBytes > maxTextureBytes) {
+      let oldest: Board | null = null;
+      for (const other of boards) {
+        if (!other.hiRes) continue;
+        if (
+          !oldest ||
+          (other.hiRes?.lastUsed ?? 0) < (oldest.hiRes?.lastUsed ?? 0)
+        )
+          oldest = other;
+      }
+      if (!oldest) break;
+      if (oldest === b) break;
+      restoreBase(oldest);
+    }
+  }
+
+  function verifyPendingUploads(): void {
+    for (const b of boards) {
+      const entry = b.verifyEntry;
+      if (!entry || b.tex !== entry.tex) continue;
+      b.verifyEntry = null;
+      void verifyHiRes(b, entry);
+    }
+  }
+
+  async function verifyHiRes(b: Board, entry: HiResEntry): Promise<void> {
+    const alpha = await readTextureAlpha(entry.tex);
+    if (destroyed || b.hiRes !== entry) return;
+    if (alpha > 0) return;
+    restoreBase(b);
+    queue.markDirty(b.el);
+    canvas.requestPaint();
+  }
+
+  async function readTextureAlpha(tex: GPUTexture): Promise<number> {
+    const width = Math.min(16, tex.width);
+    const height = Math.min(16, tex.height);
+    const origin = {
+      x: Math.max(0, Math.floor((tex.width - width) / 2)),
+      y: Math.max(0, Math.floor((tex.height - height) / 2)),
+    };
+    const bytesPerRow = Math.ceil((width * 4) / 256) * 256;
+    const buffer = device.createBuffer({
+      size: bytesPerRow * height,
+      usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+    });
+    try {
+      const encoder = device.createCommandEncoder();
+      encoder.copyTextureToBuffer(
+        { texture: tex, origin },
+        { buffer, bytesPerRow },
+        { width, height },
+      );
+      device.queue.submit([encoder.finish()]);
+      await buffer.mapAsync(GPUMapMode.READ);
+      const src = new Uint8Array(buffer.getMappedRange());
+      let max = 0;
+      for (let i = 3; i < src.length; i += 4) {
+        const a = src[i] ?? 0;
+        if (a > max) max = a;
+      }
+      buffer.unmap();
+      return max;
+    } catch {
+      return 255;
+    } finally {
+      buffer.destroy();
+    }
   }
 
   function disposeBoardResources(): void {
     for (const b of boards) {
+      releaseCaptureZoom(b);
       b.baseTex.destroy();
       b.ubo.destroy();
       if (b.hiRes) {
@@ -335,6 +607,13 @@ export async function createCompositor(
         texH,
         bind: null as unknown as GPUBindGroup,
         hiRes: null,
+        desiredScale: 1,
+        pendingScale: null,
+        pendingSince: 0,
+        verifyEntry: null,
+        baseReady: false,
+        zoomCaptureAt: null,
+        captureZoomPrev: "",
       };
       board.baseBind = bindFor(board, tex);
       board.bind = board.baseBind;
@@ -350,10 +629,15 @@ export async function createCompositor(
   function uploadEl(el: Element): void {
     const b = byEl.get(el);
     if (!b || el.parentElement !== canvas) return;
-    uploadElementImage(
-      { source: el },
-      { texture: b.tex, size: { width: b.texW, height: b.texH } },
-    );
+    try {
+      uploadElementImage(
+        { source: el },
+        { texture: b.tex, size: { width: b.texW, height: b.texH } },
+      );
+    } catch {
+      return;
+    }
+    if (b.tex === b.baseTex) b.baseReady = true;
     uploadsTotal += 1;
   }
 
@@ -398,6 +682,12 @@ export async function createCompositor(
     }
     lastT = t;
 
+    for (const b of boards) {
+      if (b.pendingScale === null || interactive) continue;
+      if (frameNo <= b.pendingSince) continue;
+      applyPendingScale(b);
+    }
+
     if (queue.size > 0) {
       const t0 = performance.now();
       const els = queue.takeAll();
@@ -408,6 +698,8 @@ export async function createCompositor(
         opts.onInitialUpload?.(ms, els.length);
       }
     }
+
+    verifyPendingUploads();
 
     camArr[0] = cam.z;
     camArr[1] = cam.x;
@@ -478,54 +770,27 @@ export async function createCompositor(
   function uploadAtScale(el: Element, scale: number): boolean {
     const b = byEl.get(el);
     if (!b || destroyed || el.parentElement !== canvas) return false;
-    if (!uploadElementImage.canResample) return false;
-    const maxDim = device.limits.maxTextureDimension2D;
-    const texW = Math.min(Math.max(1, Math.round(b.w * scale)), maxDim);
-    const texH = Math.min(Math.max(1, Math.round(b.h * scale)), maxDim);
-    if (scale <= 1 || (texW <= b.baseTexW && texH <= b.baseTexH)) {
-      if (b.hiRes) restoreBase(b);
-      return true;
-    }
-    if (b.hiRes && b.hiRes.texW === texW && b.hiRes.texH === texH) {
-      b.hiRes.lastUsed = frameNo;
-      return true;
-    }
-    const bytes = texW * texH * 4;
-    if (b.hiRes) restoreBase(b);
-    const tex = createBoardTexture(texW, texH);
-    uploadElementImage(
-      { source: el },
-      { texture: tex, size: { width: texW, height: texH } },
-    );
-    const bind = bindFor(b, tex);
-    const entry: HiResEntry = {
-      tex,
-      texW,
-      texH,
-      bind,
-      bytes,
-      lastUsed: frameNo,
-    };
-    b.hiRes = entry;
-    b.tex = tex;
-    b.texW = texW;
-    b.texH = texH;
-    b.bind = bind;
-    hiResBytes += bytes;
-    while (hiResBytes > maxTextureBytes) {
-      let oldest: Board | null = null;
-      for (const other of boards) {
-        if (!other.hiRes) continue;
-        if (
-          !oldest ||
-          (other.hiRes?.lastUsed ?? 0) < (oldest.hiRes?.lastUsed ?? 0)
-        )
-          oldest = other;
-      }
-      if (!oldest) break;
-      restoreBase(oldest);
-    }
+    if (
+      !uploadElementImage.canResample &&
+      !(captureElementImage && copyElementImage)
+    )
+      return false;
+    b.desiredScale = Math.max(1, scale);
+    scheduleScale(b);
     return true;
+  }
+
+  function setInteractive(active: boolean): void {
+    if (destroyed || interactive === active) return;
+    interactive = active;
+    for (const b of boards) {
+      b.pendingScale = null;
+      releaseCaptureZoom(b);
+      if (active) restoreBase(b);
+    }
+    if (active) return;
+    for (const b of boards) scheduleScale(b);
+    canvas.requestPaint();
   }
   async function exportBoard(
     el: Element,
@@ -640,6 +905,7 @@ export async function createCompositor(
     camera,
     setBoards,
     uploadAtScale,
+    setInteractive,
     exportBoard,
     requestPaint() {
       canvas.requestPaint();

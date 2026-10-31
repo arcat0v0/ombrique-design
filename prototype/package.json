@@ -5,7 +5,7 @@
   "main": "main.js",
   "scripts": {
     "probe": "PROTO_MODE=probe electron .",
-    "test": "PROTO_MODE=test electron .",
+    "bench": "PROTO_MODE=test electron .",
     "start": "electron ."
   },
   "devDependencies": {

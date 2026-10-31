@@ -185,6 +185,16 @@ const drag: {
   nodeOrigins?: Map<SelectedNode, { x: number; y: number }>;
 } = { mode: "none", x: 0, y: 0, moved: false, handle: null, originRect: null };
 
+interface PointerMoveSnapshot {
+  clientX: number;
+  clientY: number;
+  altKey: boolean;
+  target: EventTarget | null;
+}
+
+let pendingPointerMove: PointerMoveSnapshot | null = null;
+let pointerMoveRaf = 0;
+
 const referenceLines: ReferenceLine[] = [];
 let altPressed = false;
 let hoveredNode: SelectedNode | null = null;
@@ -251,6 +261,49 @@ function commitPadding(
   bridge?.send("ombrique:canvasEdit", { commands });
 }
 
+let guideTargetsCache: Array<{
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}> | null = null;
+
+function invalidateGuideTargets(): void {
+  guideTargetsCache = null;
+}
+
+function collectGuideTargets(): Array<{
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}> {
+  if (guideTargetsCache) return guideTargetsCache;
+  const targets: Array<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }> = [];
+  const selectedElements = new Set(multiSelection.map((s) => s.element));
+  if (selection) selectedElements.add(selection.element);
+  for (const [el] of nodeIndex) {
+    if (selectedElements.has(el)) continue;
+    if (
+      el.tagName.toLowerCase() === "section" &&
+      el.classList.contains("board")
+    ) {
+      continue;
+    }
+    const r = worldRectOf(el);
+    if (r.width > 0 && r.height > 0) {
+      targets.push(r);
+    }
+  }
+  guideTargetsCache = targets;
+  return targets;
+}
+
 function drawSmartGuides(
   dragRect?: { x: number; y: number; width: number; height: number },
   allTargets?: Array<{ x: number; y: number; width: number; height: number }>,
@@ -263,25 +316,7 @@ function drawSmartGuides(
   const currentRect = dragRect ?? (selection ? selection.rect : null);
   if (!currentRect) return null;
 
-  let targets = allTargets;
-  if (!targets) {
-    targets = [];
-    const selectedElements = new Set(multiSelection.map((s) => s.element));
-    if (selection) selectedElements.add(selection.element);
-    for (const [el] of nodeIndex) {
-      if (selectedElements.has(el)) continue;
-      if (
-        el.tagName.toLowerCase() === "section" &&
-        el.classList.contains("board")
-      ) {
-        continue;
-      }
-      const r = worldRectOf(el);
-      if (r.width > 0 && r.height > 0) {
-        targets.push(r);
-      }
-    }
-  }
+  const targets = allTargets ?? collectGuideTargets();
 
   const equalGaps = collectEqualGaps(targets);
   const threshold = options?.threshold ?? 6 / camera.z;
@@ -336,6 +371,7 @@ function isEditableNode(node: SelectedNode): boolean {
 function selectSingle(node: SelectedNode | null): void {
   selection = node;
   multiSelection = node ? [node] : [];
+  invalidateGuideTargets();
   emitSelection();
   drawOverlay();
 }
@@ -351,11 +387,17 @@ function toggleInSelection(node: SelectedNode): void {
     multiSelection.push(node);
     selection = node;
   }
+  invalidateGuideTargets();
   emitSelection();
   drawOverlay();
 }
 
+let lastEmittedZoomPercent = -1;
+
 function emitZoom() {
+  const percent = Math.round(camera.z * 100);
+  if (percent === lastEmittedZoomPercent) return;
+  lastEmittedZoomPercent = percent;
   bridge?.send("ombrique:zoomChanged", camera.z);
 }
 
@@ -621,14 +663,67 @@ function worldRectOf(element: Element): {
       height: bounds.height / camera.z,
     };
   }
-  const boardBounds = board.getBoundingClientRect();
   const origin = boardWorldOrigin(element);
+  if (!(element instanceof HTMLElement)) {
+    let ancestor: Element | null = element.parentElement;
+    while (ancestor && !(ancestor instanceof HTMLElement)) {
+      ancestor = ancestor.parentElement;
+    }
+    const host = ancestor instanceof HTMLElement ? ancestor : null;
+    if (!host) {
+      return {
+        x: origin.x + bounds.left,
+        y: origin.y + bounds.top,
+        width: bounds.width,
+        height: bounds.height,
+      };
+    }
+    const hostOffset = layoutOffsetWithin(host, board);
+    const hostBounds = host.getBoundingClientRect();
+    return {
+      x: origin.x + hostOffset.x + (bounds.left - hostBounds.left),
+      y: origin.y + hostOffset.y + (bounds.top - hostBounds.top),
+      width: bounds.width,
+      height: bounds.height,
+    };
+  }
+  const offset = layoutOffsetWithin(element, board);
   return {
-    x: origin.x + (bounds.left - boardBounds.left),
-    y: origin.y + (bounds.top - boardBounds.top),
-    width: bounds.width,
-    height: bounds.height,
+    x: origin.x + offset.x,
+    y: origin.y + offset.y,
+    width: element.offsetWidth,
+    height: element.offsetHeight,
   };
+}
+
+function accumulateLayoutOffset(
+  element: Element,
+  board: HTMLElement,
+): {
+  x: number;
+  y: number;
+} {
+  let x = 0;
+  let y = 0;
+  let current: HTMLElement | null = element as HTMLElement;
+  while (current) {
+    x += current.offsetLeft;
+    y += current.offsetTop;
+    if (current === board) break;
+    const parent = current.offsetParent as HTMLElement | null;
+    if (!parent) break;
+    current = parent;
+  }
+  return { x, y };
+}
+
+function layoutOffsetWithin(
+  element: HTMLElement,
+  board: HTMLElement,
+): { x: number; y: number } {
+  const own = accumulateLayoutOffset(element, board);
+  const boardOffset = accumulateLayoutOffset(board, board);
+  return { x: own.x - boardOffset.x, y: own.y - boardOffset.y };
 }
 
 function refreshSelectionRect(): void {
@@ -655,6 +750,16 @@ function updateBoardResolutions(): void {
     boardScales.set(el, desiredScale);
     compositor.uploadAtScale(el, desiredScale);
   }
+}
+
+function beginNodeInteraction(): void {
+  invalidateGuideTargets();
+  compositor?.setInteractive(true);
+}
+
+function endNodeInteraction(): void {
+  compositor?.setInteractive(false);
+  invalidateGuideTargets();
 }
 
 function fitToViewport(): void {
@@ -688,6 +793,7 @@ function fitToViewport(): void {
   camera.y = minY - (bounds.height - totalHeight * camera.z) / 2 / camera.z;
   compositor?.camera.set(camera);
   updateBoardResolutions();
+  emitZoom();
   drawOverlay();
 }
 
@@ -726,6 +832,7 @@ async function mountPage(file: string) {
     }
   }
   registerSubtree(board.element, board.element, file);
+  invalidateGuideTargets();
 
   const allBoards: BoardInit[] = [];
   let x = 0;
@@ -1883,6 +1990,8 @@ function beginTextEdit(): void {
   if (element.children.length > 0) return;
   editingOriginal = element.textContent ?? "";
   editingText = element;
+  element.style.userSelect = "text";
+  element.style.setProperty("-webkit-user-select", "text");
   element.contentEditable = "true";
   element.focus();
   const range = document.createRange();
@@ -1913,6 +2022,8 @@ function commitTextEdit(): void {
   const element = editingText;
   const next = element.textContent ?? "";
   element.contentEditable = "false";
+  element.style.userSelect = "";
+  element.style.removeProperty("-webkit-user-select");
   element.removeEventListener("keydown", onEditKeyDown);
   editingText = null;
   const changed = next !== editingOriginal;
@@ -1939,6 +2050,8 @@ function commitTextEdit(): void {
 function cancelTextEdit(): void {
   if (!editingText) return;
   editingText.contentEditable = "false";
+  editingText.style.userSelect = "";
+  editingText.style.removeProperty("-webkit-user-select");
   editingText.removeEventListener("keydown", onEditKeyDown);
   editingText.textContent = editingOriginal || editingText.textContent;
   editingText = null;
@@ -2420,6 +2533,7 @@ async function init() {
       return;
     }
     if (event.button === 1 || spacePressed || toolMode === "hand") {
+      drag.mode = "pan";
       drag.x = event.clientX;
       drag.y = event.clientY;
       drag.moved = false;
@@ -2491,6 +2605,7 @@ async function init() {
       if (pathHandle) {
         const d = getPathData(selection);
         if (d) {
+          beginNodeInteraction();
           drag.mode = "pathHandle";
           drag.pathAnchorIndex = pathHandle.anchorIndex;
           drag.pathHandleIndex = pathHandle.handleIndex;
@@ -2508,6 +2623,7 @@ async function init() {
       if (pathAnchor) {
         const d = getPathData(selection);
         if (d) {
+          beginNodeInteraction();
           drag.mode = "pathAnchor";
           drag.pathAnchorIndex = pathAnchor.index;
           drag.originalD = d;
@@ -2559,6 +2675,7 @@ async function init() {
       isEditableNode(selection) &&
       multiSelection.length <= 1
     ) {
+      beginNodeInteraction();
       drag.mode = "scale";
       drag.handle = handle;
       drag.originRect = { ...selection.rect };
@@ -2574,6 +2691,7 @@ async function init() {
     }
     if (hit && multiSelection.some((s) => s.element === hit.element)) {
       if (multiSelection.every(isEditableNode)) {
+        beginNodeInteraction();
         drag.mode = "move";
         drag.originRect = selection ? { ...selection.rect } : null;
         drag.nodeOrigins = new Map(
@@ -2588,6 +2706,7 @@ async function init() {
     if (hit) {
       selectSingle(hit);
       if (isEditableNode(hit)) {
+        beginNodeInteraction();
         drag.mode = "move";
         drag.originRect = { ...hit.rect };
         drag.nodeOrigins = new Map([[hit, { ...hit.rect }]]);
@@ -2606,6 +2725,22 @@ async function init() {
     marquee = { x0: wx, y0: wy, x1: wx, y1: wy };
   });
   host.addEventListener("pointermove", (event) => {
+    pendingPointerMove = {
+      clientX: event.clientX,
+      clientY: event.clientY,
+      altKey: event.altKey,
+      target: event.target,
+    };
+    if (pointerMoveRaf) return;
+    pointerMoveRaf = requestAnimationFrame(() => {
+      pointerMoveRaf = 0;
+      const move = pendingPointerMove;
+      pendingPointerMove = null;
+      if (move) handlePointerMove(move);
+    });
+  });
+
+  function handlePointerMove(event: PointerMoveSnapshot): void {
     if (drag.mode === "pen" && penDraft && penDraft.draggingHandle) {
       const board = currentFile ? boards.get(currentFile) : undefined;
       if (board) {
@@ -2865,7 +3000,7 @@ async function init() {
     if (drag.mode === "scale" && selection && drag.handle && drag.originRect) {
       previewScale(drag.handle, drag.originRect, dx / camera.z, dy / camera.z);
     }
-  });
+  }
   const endDrag = (event: PointerEvent) => {
     if (drag.mode === "none") return;
     if (drag.mode === "pen") {
@@ -3048,8 +3183,21 @@ async function init() {
     drag.snappedDy = undefined;
     drawOverlay();
   };
-  host.addEventListener("pointerup", endDrag);
+  host.addEventListener("pointerup", (event) => {
+    if (pendingPointerMove) {
+      const move = pendingPointerMove;
+      pendingPointerMove = null;
+      if (pointerMoveRaf) {
+        cancelAnimationFrame(pointerMoveRaf);
+        pointerMoveRaf = 0;
+      }
+      handlePointerMove(move);
+    }
+    endDrag(event);
+    endNodeInteraction();
+  });
   host.addEventListener("pointercancel", () => {
+    endNodeInteraction();
     drag.mode = "none";
     drag.handle = null;
     drag.originRect = null;
@@ -3063,6 +3211,11 @@ async function init() {
     marquee = null;
     createPreview = null;
     drawOverlay();
+  });
+  host.addEventListener("dragstart", (event) => {
+    const target = event.target as Node | null;
+    if (editingText && target && editingText.contains(target)) return;
+    event.preventDefault();
   });
   host.addEventListener("wheel", (event) => {
     event.preventDefault();
@@ -3079,6 +3232,7 @@ async function init() {
     }
     updateBoardResolutions();
     refreshSelectionRect();
+    emitZoom();
     drawOverlay();
   });
   host.addEventListener("dblclick", (event) => {
@@ -3468,6 +3622,7 @@ async function init() {
       camera.z = next.z;
       updateBoardResolutions();
       refreshSelectionRect();
+      emitZoom();
       drawOverlay();
     }
   });
@@ -3482,6 +3637,7 @@ async function init() {
     }
     boards.clear();
     boardScales.clear();
+    invalidateGuideTargets();
     const active =
       manifest.pages.find((page) => page.file === currentFile) ??
       manifest.pages[0];
