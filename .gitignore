@@ -6,3 +6,7 @@ dist/
 .omp/
 .vitest/
 **/.vitest/
+
+# AOCI agent host integration (machine-bound; do not commit)
+.mcp.json
+.mcp.json.backup.*

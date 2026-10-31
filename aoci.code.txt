@@ -1,0 +1,202 @@
+#AOCI-CODE-VOLUME: 1
+
+===/home/arcat/Develop/ombrique/ombrique-design/===
+.gitattributes[XO2T]: F:Defines git line-ending normalization and diff handling for repository files | R:- | A:- | S:-
+.gitignore[XC4T]: F:Keeps dependency, build, and local runtime artifacts out of git tracking | R:- | A:- | S:-
+AGENTS.md[SG4S]: F:Specifies agent collaboration rules, pnpm workflow commands, and repository conventions | R:- | A:- | S:-
+README.md[SG4S]: F:Documents project purpose, architecture overview, and getting-started instructions | R:- | A:- | S:-
+biome.json[FC4T]: F:Configures Biome lint and formatting rules for the whole repository | R:- | A:- | S:-
+package.json[FV5T]: F:Declares workspace scripts, pnpm and Node engine requirements, and shared dev dependencies | R:- | A:- | S:-
+pnpm-lock.yaml[FV2L]: F:Locks exact dependency versions for the pnpm workspace | R:- | A:- | S:-
+pnpm-workspace.yaml[FV3T]: F:Declares workspace packages and pnpm build and release-age settings | R:- | A:- | S:-
+tsconfig.base.json[FC4T]: F:Defines strict shared TypeScript compiler options inherited by every package | R:- | A:- | S:-
+
+===/home/arcat/Develop/ombrique/ombrique-design/apps/desktop/===
+electron.vite.config.ts[FO4T]: F:Configures electron-vite build for main, preload, and renderer processes of the desktop app | R:code:apps/desktop/package.json | A:- | S:-
+package.json[FV4T]: F:Declares desktop app dependencies, scripts, and Electron build metadata | R:- | A:- | S:-
+tsconfig.json[FC4T]: F:Defines TypeScript compiler options for desktop app sources | R:- | A:- | S:-
+
+===/home/arcat/Develop/ombrique/ombrique-design/apps/desktop/src/canvas/===
+export-node.ts[IC4S]: F:Renders canvas nodes offscreen and serializes them to export images | R:code:apps/desktop/src/canvas/runtime.ts | A:- | S:-
+interactions.ts[AU7L]: F:Translates pointer and keyboard input into canvas editing operations such as select, move, resize, and pan | R:code:apps/desktop/src/canvas/runtime.ts | A:- | S:-
+runtime.ts[AU8L]: F:Runs the canvas render loop owning scene state, viewport transforms, and paint commands for artboards | R:code:apps/desktop/src/canvas/interactions.ts,code:apps/desktop/src/canvas/export-node.ts,code:apps/desktop/src/shell/public/canvas.html | A:- | S:-
+
+===/home/arcat/Develop/ombrique/ombrique-design/apps/desktop/src/main/===
+doc-host.ts[DU6M]: F:Hosts document persistence in the Electron main process and brokers open and save between renderer and disk | R:code:apps/desktop/src/main/index.ts,code:apps/desktop/src/main/export-writer.ts | A:- | S:-
+export-writer.ts[DO3S]: F:Writes export artifacts to disk via Node fs in the Electron main process | R:code:apps/desktop/src/main/doc-host.ts | A:- | S:-
+index.ts[AU8L]: F:Creates Electron windows, registers IPC handlers, and wires main-process services for the desktop app | R:code:apps/desktop/src/main/doc-host.ts,code:apps/desktop/src/main/layer-tree.ts,code:apps/desktop/src/main/export-writer.ts,code:apps/desktop/src/preload/shell.ts,code:apps/desktop/src/preload/canvas.ts | A:main | S:-
+layer-tree.ts[DU4T]: F:Builds and maintains the layer hierarchy from document nodes | R:code:apps/desktop/src/main/doc-host.ts | A:- | S:-
+
+===/home/arcat/Develop/ombrique/ombrique-design/apps/desktop/src/preload/===
+canvas.ts[EU4T]: F:Exposes canvas IPC bridge methods from the canvas iframe to main-process channels | R:code:apps/desktop/src/main/index.ts | A:- | S:-
+shell.ts[EU6M]: F:Exposes the shell IPC bridge covering menus, dialogs, and document events to the renderer via contextBridge | R:code:apps/desktop/src/main/index.ts | A:- | S:-
+
+===/home/arcat/Develop/ombrique/ombrique-design/apps/desktop/src/shell/===
+App.tsx[EU6T]: F:Renders the top-level editor shell layout composing panels and the canvas view | R:code:apps/desktop/src/shell/state.ts | A:App | S:-
+index.html[EU2T]: F:HTML entry template for the shell renderer window | R:code:apps/desktop/src/shell/main.tsx | A:- | S:-
+main.tsx[EU4T]: F:Mounts the shell React application into the DOM | R:code:apps/desktop/src/shell/App.tsx | A:- | S:-
+state.ts[DU8L]: F:Manages editor UI state covering document model, selection, panels, and undo history | R:code:apps/desktop/src/shell/App.tsx,code:apps/desktop/src/preload/shell.ts,code:apps/desktop/src/shell/main.tsx | A:- | S:-
+
+===/home/arcat/Develop/ombrique/ombrique-design/apps/desktop/src/shell/public/===
+canvas.html[EU5T]: F:HTML host page that loads the canvas runtime in an isolated iframe | R:code:apps/desktop/src/canvas/runtime.ts | A:- | S:-
+
+===/home/arcat/Develop/ombrique/ombrique-design/config/===
+mcporter.json[FC3T]: F:Registers the project-scoped AOCI MCP server for the mcporter tool runner | R:- | A:- | S:-
+
+===/home/arcat/Develop/ombrique/ombrique-design/example-project/===
+comments.json[DC2T]: F:Stores the example project's comment threads anchored to nodes and canvas positions | R:- | A:- | S:-
+ombrique.json[DC2T]: F:Declares the example project's page list mapping page ids to their TSX files | R:- | A:- | S:-
+tokens.css[FC4T]: F:Defines light and dark design tokens as CSS custom properties | R:- | A:- | S:-
+
+===/home/arcat/Develop/ombrique/ombrique-design/example-project/pages/===
+home.tsx[DU5T]: F:Defines the Home page scene as a Frame of runtime primitives rendered by the canvas | R:- | A:- | S:-
+pricing.tsx[DU4T]: F:Defines the Pricing page scene as a Frame of runtime primitives rendered by the canvas | R:- | A:- | S:-
+
+===/home/arcat/Develop/ombrique/ombrique-design/packages/canvas/===
+package.json[FV3T]: F:Declares the canvas package exports, test and typecheck scripts, and WebGPU type dependencies | R:- | A:- | S:-
+tsconfig.json[FC2T]: F:Extends the base TypeScript config with WebGPU and DOM types for canvas sources | R:- | A:- | S:-
+
+===/home/arcat/Develop/ombrique/ombrique-design/packages/canvas/src/===
+camera.ts[KC4T]: F:Implements camera math for zoom, pan, and screen-world coordinate conversion with zoom clamping | R:- | A:- | S:-
+canvas-in-canvas.d.ts[XC3T]: F:Declares ambient canvas-in-canvas extensions: element painting events and element-image GPU queue methods | R:- | A:- | S:-
+compositor.ts[KU8L]: F:Renders board elements to a WebGPU canvas by uploading element textures, transforming them by camera, and compositing per frame | R:code:packages/canvas/src/camera.ts,code:packages/canvas/src/uploadQueue.ts,code:packages/canvas/src/element-upload.ts | A:- | S:-
+element-upload.ts[KC4T]: F:Resolves the available WebGPU element-image upload path, preferring resampling draw over copy | R:- | A:- | S:-
+guides.ts[KU7L]: F:Computes smart alignment guides, equal-spacing detection, and rect snapping against reference lines | R:- | A:- | S:-
+index.ts[CC4T]: F:Re-exports the canvas package's public API across camera, compositor, path, guide, and upload modules | R:- | A:- | S:-
+path-utils.ts[KC7L]: F:Parses, serializes, and edits SVG path data including anchor points and cubic control handles | R:- | A:- | S:-
+uploadQueue.ts[KC3T]: F:Tracks dirty elements pending texture upload and records initial upload timing | R:- | A:- | S:-
+
+===/home/arcat/Develop/ombrique/ombrique-design/packages/compiler/===
+package.json[FV3T]: F:Declares the compiler package exports and its Vite dependencies | R:- | A:- | S:-
+tsconfig.json[FC2T]: F:Extends the base TypeScript config for compiler sources | R:- | A:- | S:-
+
+===/home/arcat/Develop/ombrique/ombrique-design/packages/compiler/src/===
+channel.ts[IC5T]: F:Bridges Vite server hot-channel events to editor wire payloads in both directions | R:- | A:- | S:-
+compiler.ts[AU8T]: F:Runs an embedded Vite dev server that transforms design TSX pages, aliasing React and the runtime package | R:code:packages/compiler/src/channel.ts | A:- | S:-
+index.ts[CC3T]: F:Re-exports the compiler package's public API | R:- | A:- | S:-
+url.ts[KC4T]: F:Maps request URLs to project paths, detects virtual modules, and resolves MIME types | R:- | A:- | S:-
+
+===/home/arcat/Develop/ombrique/ombrique-design/packages/doc-service/===
+package.json[FV3T]: F:Declares the doc-service package exports and its protocol and source workspace dependencies | R:- | A:- | S:-
+tsconfig.json[FC2T]: F:Extends the base TypeScript config with Node types for doc-service sources | R:- | A:- | S:-
+
+===/home/arcat/Develop/ombrique/ombrique-design/packages/doc-service/src/===
+bundle.ts[DU6S]: F:Packs a project's design files into a gzipped base64 bundle and extracts bundles back to disk | R:- | A:- | S:S:Bundle inclusion is whitelist-based: only pages, components, assets, fonts, ombrique.json, and tokens.css are packed; dotfiles and node_modules are never included
+comments.ts[DU6S]: F:Implements comment thread CRUD over comments.json validated by the protocol schema | R:- | A:- | S:S:Every parse and serialize round-trips through commentsDocSchema, so malformed comment files fail loudly instead of being silently repaired
+git.ts[IC6M]: F:Wraps git CLI operations for branches, status, history, and version snapshots in the design project | R:- | A:- | S:S:execGit disables terminal prompts via GIT_TERMINAL_PROMPT=0, so git never hangs the editor waiting for credentials
+history.ts[DU4T]: F:Tracks undo and redo entries of file snapshots and invalidates history for externally touched files | R:- | A:- | S:S:Consecutive records with overlapping files and identical after-content replace the last entry instead of pushing a new one, coalescing no-op undo steps
+index.ts[CC4T]: F:Re-exports the doc-service public API across service, project, bundle, comments, git, paths, and history | R:- | A:- | S:-
+paths.ts[PC7T]: F:Provides project file listing, manifest reading, hashing, and atomic writes | R:- | A:- | S:S:resolveInside rejects absolute paths and any traversal escaping the project root; writeFileAtomic writes a pid-suffixed temp file then renames so readers never see partial files
+project.ts[DC7M]: F:Loads a project snapshot of manifest, file texts, versions, and design index, and plans edit commands into text edits | R:code:packages/doc-service/src/paths.ts,code:packages/source/src/index.ts | A:- | S:-
+service.ts[DC9L]: F:Owns the open document: applies edit transactions, emits DocToShell messages, watches files, and manages undo history | R:code:packages/doc-service/src/project.ts,code:packages/doc-service/src/history.ts,code:packages/doc-service/src/paths.ts | A:- | S:-
+
+===/home/arcat/Develop/ombrique/ombrique-design/packages/editor-ui/===
+components.json[FC3T]: F:Configures shadcn generation aliases, style, icon library, and Tailwind theme paths for editor-ui | R:- | A:- | S:-
+package.json[FV4T]: F:Declares editor-ui dependencies on Radix primitives, Tailwind, and the protocol workspace package | R:- | A:- | S:-
+test-setup.ts[TQ2T]: F:Installs jsdom matchMedia and ResizeObserver mocks needed by Radix components in tests | R:- | A:- | S:-
+tsconfig.json[FC2T]: F:Extends the base TypeScript config with the @ path alias for editor-ui | R:- | A:- | S:-
+vitest.config.ts[TQ3T]: F:Configures vitest with jsdom and the @ alias for editor-ui tests | R:- | A:- | S:-
+
+===/home/arcat/Develop/ombrique/ombrique-design/packages/editor-ui/src/===
+ApplicationMenu.tsx[EU6M]: F:Renders the app menu bar with project open, export, undo, redo, delete, and zoom actions | R:- | A:- | S:-
+AssetsPanel.tsx[EU6M]: F:Shows the assets panel listing pages, components, and assets with search and insertion actions | R:- | A:- | S:-
+CommentsPanel.tsx[EU6M]: F:Renders comment threads with reply, resolve, and delete actions anchored to the canvas selection | R:- | A:- | S:-
+CornerRadiusControl.tsx[EU5M]: F:Edits corner radius of the selection with linked or per-corner values | R:- | A:- | S:-
+DiagnosticsBar.tsx[EU5T]: F:Displays diagnostic count, latest diagnostic severity, and dismissible notices in the footer bar | R:- | A:- | S:-
+EffectSection.tsx[EU6L]: F:Edits shadow and blur effects of the selection with per-effect visibility and removal | R:- | A:- | S:-
+ExportSection.tsx[EU6M]: F:Manages per-selection export settings including scales and formats | R:- | A:- | S:-
+FillSection.tsx[EU6M]: F:Edits fills of the selection including color picker and gradient entry | R:- | A:- | S:-
+FloatingToolSwitcher.tsx[EU5S]: F:Renders the floating toolbar for switching canvas tools such as select, hand, frame, shape, pen, text, and comment | R:- | A:- | S:-
+GradientEditor.tsx[EU6M]: F:Edits gradient type, angle, and stops with draggable stop positions | R:- | A:- | S:-
+LayersPanel.tsx[EU7L]: F:Renders the layer tree with reorder, rename, visibility, and lock controls over LayerNode hierarchy | R:- | A:- | S:-
+PagesPanel.tsx[EU6M]: F:Lists document pages with add, rename, switch, and delete actions | R:- | A:- | S:-
+PropertiesPanel.tsx[EU8L]: F:Composes the right-hand inspector assembling geometry, layout, fill, stroke, effects, typography, and prototype sections for the selection | R:code:packages/editor-ui/src/FillSection.tsx,code:packages/editor-ui/src/StrokeSection.tsx,code:packages/editor-ui/src/EffectSection.tsx,code:packages/editor-ui/src/TypographySection.tsx,code:packages/editor-ui/src/ExportSection.tsx | A:- | S:-
+Shell.tsx[EU8L]: F:Composes the whole editor layout wiring panels, canvas iframe, menus, toolbars, and shell IPC state | R:code:packages/editor-ui/src/LayersPanel.tsx,code:packages/editor-ui/src/PagesPanel.tsx,code:packages/editor-ui/src/PropertiesPanel.tsx,code:packages/editor-ui/src/DiagnosticsBar.tsx | A:- | S:-
+StrokeSection.tsx[EU6M]: F:Edits stroke color, weight, alignment, and style of the selection | R:- | A:- | S:-
+TokensPanel.tsx[EU7L]: F:Browses and applies design tokens from tokens.css to selection properties and edits token values | R:- | A:- | S:-
+Toolbar.tsx[EU6L]: F:Renders the top toolbar with editing actions, zoom controls, and view mode switches | R:- | A:- | S:-
+TypographySection.tsx[EU7L]: F:Edits text properties of the selection including font, size, weight, alignment, and line height | R:- | A:- | S:-
+VersionHistoryPanel.tsx[EU6L]: F:Shows git branches, commit history, and saved versions with preview and restore actions | R:- | A:- | S:-
+css.d.ts[XC1T]: F:Declares the ambient module type for CSS imports | R:- | A:- | S:-
+effectStyles.ts[KC6M]: F:Parses and serializes CSS shadow and blur effects between inspector values and style declarations | R:- | A:- | S:-
+fixtures.ts[TQ3T]: F:Builds test fixture LayerNode and selection factories for editor-ui tests | R:- | A:- | S:-
+gradientStyles.ts[KC6S]: F:Converts CSS gradients to and from structured gradient stops, types, and angles | R:- | A:- | S:-
+index.ts[CC4T]: F:Re-exports the editor-ui public API of shell, panels, sections, and shared helpers | R:- | A:- | S:-
+parseStyleInput.ts[KC5T]: F:Parses inspector text input into style declarations, coercing numeric keys and rejecting invalid values | R:- | A:- | S:-
+theme.css[FU4S]: F:Defines the editor theme as Tailwind v4 CSS variables including light and dark modes | R:code:packages/editor-ui/components.json | A:- | S:-
+types.ts[DC7M]: F:Defines the editor-ui shared types for layer nodes, selection summaries, shell views, actions, and canvas stats | R:code:packages/protocol/src/index.ts | A:- | S:-
+
+===/home/arcat/Develop/ombrique/ombrique-design/packages/editor-ui/src/components/ui/===
+alert-dialog.tsx[EU3M]: F:Wraps Radix alert dialog primitives into styled destructive-confirmation components | R:- | A:- | S:-
+badge.tsx[EU3T]: F:Wraps Radix badge primitives into a styled label component with variants | R:- | A:- | S:-
+button.tsx[EU4T]: F:Wraps Radix button primitives into the shared Button component with cva variants and sizes | R:- | A:- | S:-
+context-menu.tsx[EU3M]: F:Wraps Radix context-menu primitives into styled right-click menu components | R:- | A:- | S:-
+dialog.tsx[EU4S]: F:Wraps Radix dialog primitives into styled modal dialog components | R:- | A:- | S:-
+dropdown-menu.tsx[EU3M]: F:Wraps Radix dropdown-menu primitives into styled dropdown components | R:- | A:- | S:-
+field.tsx[EU3M]: F:Wraps Radix field primitives into labeled form field components for inspector controls | R:- | A:- | S:-
+input.tsx[EU3T]: F:Wraps the HTML input element into the shared styled Input component | R:- | A:- | S:-
+kbd.tsx[EU3T]: F:Renders keyboard shortcut keys as styled kbd chips | R:- | A:- | S:-
+label.tsx[EU3T]: F:Wraps Radix label primitives into the shared styled Label component | R:- | A:- | S:-
+resizable.tsx[EU3T]: F:Re-exports react-resizable-panels wrapped with group context for panel layout | R:- | A:- | S:-
+scroll-area.tsx[EU3T]: F:Wraps Radix scroll-area primitives into styled scrollable containers | R:- | A:- | S:-
+separator.tsx[EU3T]: F:Wraps Radix separator primitives into a styled divider component | R:- | A:- | S:-
+textarea.tsx[EU3T]: F:Wraps the HTML textarea into the shared styled Textarea component | R:- | A:- | S:-
+toggle-group.tsx[EU3T]: F:Wraps Radix toggle-group primitives into styled multi and single toggle groups | R:- | A:- | S:-
+toggle.tsx[EU3T]: F:Wraps Radix toggle primitives into a styled pressed-state button | R:- | A:- | S:-
+tooltip.tsx[EU3T]: F:Wraps Radix tooltip primitives into styled hover hints | R:- | A:- | S:-
+
+===/home/arcat/Develop/ombrique/ombrique-design/packages/editor-ui/src/lib/===
+utils.ts[CU2T]: F:Merges Tailwind class names via clsx and tailwind-merge | R:- | A:- | S:-
+
+===/home/arcat/Develop/ombrique/ombrique-design/packages/protocol/===
+package.json[FV4T]: F:Declares the protocol package exports and its zod dependency | R:- | A:- | S:-
+tsconfig.json[FC2T]: F:Extends the base TypeScript config for protocol sources | R:- | A:- | S:-
+
+===/home/arcat/Develop/ombrique/ombrique-design/packages/protocol/src/===
+export.ts[DC6S]: F:Defines zod schemas for export formats, scale constraints, and export settings | R:- | A:- | S:-
+index.ts[DC9L]: F:Defines all zod schemas and types for node specs, edit commands, manifests, comments, git, and IPC messages shared across packages | R:code:packages/protocol/src/export.ts | A:- | S:This package is the single validation boundary: doc-service, editor-ui, and main-process code parse external JSON through these schemas before use
+
+===/home/arcat/Develop/ombrique/ombrique-design/packages/runtime/===
+package.json[FV4T]: F:Declares the runtime package exports, its React dependency, and test scripts | R:- | A:- | S:-
+tsconfig.json[FC2T]: F:Extends the base TypeScript config for runtime sources | R:- | A:- | S:-
+vitest.config.ts[TQ2T]: F:Configures vitest for runtime tests | R:- | A:- | S:-
+
+===/home/arcat/Develop/ombrique/ombrique-design/packages/runtime/src/===
+Boolean.tsx[DU4T]: F:Renders boolean operations union, subtract, intersect, and exclude over child shapes as SVG groups | R:- | A:- | S:-
+Ellipse.tsx[DU4T]: F:Renders an absolutely positioned ellipse element with fill and border-radius styling | R:- | A:- | S:-
+Frame.tsx[DU6S]: F:Renders a positioned Frame container supporting free, auto-layout, and grid child arrangement | R:- | A:- | S:-
+Group.tsx[DU3T]: F:Renders a named grouping div for organizing child elements | R:- | A:- | S:-
+Image.tsx[DU4T]: F:Renders an image element positioned in the canvas with object-fit styling | R:- | A:- | S:-
+Path.tsx[DU4T]: F:Renders an SVG element drawing path data with viewport-relative coordinates | R:- | A:- | S:-
+Rect.tsx[DU4T]: F:Renders an absolutely positioned rectangle element with fill and radius styling | R:- | A:- | S:-
+Star.tsx[DU4T]: F:Renders a star polygon SVG generated from point count and radius math | R:- | A:- | S:-
+Text.tsx[DU4T]: F:Renders an absolutely positioned text element with typography styling | R:- | A:- | S:-
+Vector.tsx[DU4T]: F:Renders an SVG element with path data and vector network styling | R:- | A:- | S:-
+index.ts[CC4T]: F:Re-exports the runtime component library used by design page sources | R:- | A:- | S:-
+internal.ts[CU3T]: F:Provides internal helpers for class joining, absolute positioning styles, and data-name attributes | R:- | A:- | S:-
+starMath.ts[KC2T]: F:Computes star polygon vertex coordinates from point count and radii | R:- | A:- | S:-
+
+===/home/arcat/Develop/ombrique/ombrique-design/packages/source/===
+package.json[FV4T]: F:Declares the source package exports and its protocol workspace dependency | R:- | A:- | S:-
+tsconfig.json[FC2T]: F:Extends the base TypeScript config for source package tests and sources | R:- | A:- | S:-
+
+===/home/arcat/Develop/ombrique/ombrique-design/packages/source/src/===
+apply-edits.ts[KC5T]: F:Applies sorted text edits to source text producing patched file content | R:- | A:- | S:-
+build-index.ts[KC8M]: F:Builds the design index of pages, components, and variant axes from design file sources and locates nodes by path | R:- | A:- | S:-
+index.ts[CC5T]: F:Re-exports the source package API for index building, patch planning, edit application, and parsing | R:- | A:- | S:-
+parse-design-file.ts[KC8M]: F:Parses design TSX into positioned node specs with source offsets enabling precise text patches | R:- | A:- | S:-
+parse-stylesheet.ts[KC6S]: F:Parses stylesheets into declaration tables and token tables with source ranges for patching | R:- | A:- | S:-
+plan-patch.ts[KC9L]: F:Plans edit commands into minimal text edits over design sources, including node mutation, creation, deletion, duplication, and component synthesis | R:code:packages/source/src/parse-design-file.ts,code:packages/source/src/apply-edits.ts,code:packages/protocol/src/index.ts | A:- | S:Patches are computed against parsed source offsets and never rewrite whole files, keeping git diffs minimal; commands are validated against the protocol editCommandSchema before planning
+types.ts[DC5S]: F:Defines source-level types for spans, style props, attribute values, and class name info used by the parser and planner | R:- | A:- | S:-
+
+===/home/arcat/Develop/ombrique/ombrique-design/prototype/===
+.gitignore[XC1T]: F:Keeps prototype output artifacts out of git tracking | R:- | A:- | S:-
+index.html[EU3S]: F:Host page of the Electron canvas prototype with a strict CSP and the canvas element | R:- | A:- | S:-
+main.js[AR3T]: F:Runs the prototype Electron main process launching windows per PROTO_MODE and saving probe screenshots | R:- | A:- | S:-
+package.json[FV2T]: F:Declares the standalone canvas prototype package scripts and Electron dependency | R:- | A:- | S:-
+pnpm-lock.yaml[FV1M]: F:Locks dependency versions for the standalone prototype package | R:- | A:- | S:-
+pnpm-workspace.yaml[FV1T]: F:Excludes electron from the prototype's minimum release age check | R:- | A:- | S:-
+preload.js[EU3T]: F:Exposes the prototype IPC bridge for probe reporting and paint counters via contextBridge | R:- | A:- | S:-
+probe.html[EU1T]: F:Minimal probe page that runs environment detection scripts | R:- | A:- | S:-
+probe.js[TQ3T]: F:Detects Chromium version and canvas-in-canvas API availability and reports probe results | R:- | A:- | S:-
+renderer.js[AU5L]: F:Renders a grid of many artboard canvases to measure compositor framerate and paint behavior at scale | R:- | A:- | S:-
