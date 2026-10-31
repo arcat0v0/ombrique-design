@@ -7,7 +7,20 @@ import type {
   ShellView,
   StyleRow,
 } from "@ombrique/editor-ui";
-import type { DiagnosticItem, Manifest, TokenItem } from "@ombrique/protocol";
+import type {
+  CommentAnchor,
+  CommentThread,
+  CommentsDoc,
+  ComponentSummaryItem,
+  DiagnosticItem,
+  ExportSetting,
+  GitBranchList,
+  GitCommit,
+  GitStatus,
+  Manifest,
+  TokenItem,
+  TokenModeItem,
+} from "@ombrique/protocol";
 
 export interface StyleTarget {
   source?: "inline" | "shared" | "token" | "computed";
@@ -26,6 +39,7 @@ export type ExtendedStyleRow = StyleRow & {
 
 export type ShellViewWithTokens = ShellView & {
   tokens: TokenItem[];
+  tokenModes?: TokenModeItem[];
 };
 
 export type ShellActionsWithTokens = ShellActions & {
@@ -35,14 +49,21 @@ export type ShellActionsWithTokens = ShellActions & {
     target?: StyleTarget,
   ) => void;
   refreshTokens?: () => Promise<void>;
-  setToken?: (name: string, value: string) => Promise<void>;
+  setToken?: (name: string, value: string, mode?: string) => Promise<void>;
+  addTokenMode?: (name: string) => Promise<void>;
+  renameTokenMode?: (name: string, newName: string) => Promise<void>;
+  deleteTokenMode?: (name: string) => Promise<void>;
   createToken?: (name: string, value: string) => Promise<void>;
   createComponent?: (name: string) => Promise<boolean>;
   detachInstance?: () => Promise<boolean>;
+  createComponentInstance?: (
+    componentName: string,
+    position?: { x: number; y: number },
+  ) => Promise<boolean>;
   insertImage?: () => Promise<boolean>;
   flattenSelection?: () => Promise<boolean>;
   exportNode?: (
-    format: "png" | "jpg" | "webp" | "svg" | "pdf",
+    formatOrSettings: "png" | "jpg" | "webp" | "svg" | "pdf" | ExportSetting[],
     scale?: number,
   ) => Promise<boolean>;
   bundleProject?: () => Promise<boolean>;
@@ -87,6 +108,7 @@ export interface ResolvedNode {
     valueSpan: { start: number; end: number };
   }>;
   componentName?: string;
+  variantAxes?: Array<{ name: string; values: string[] }>;
 }
 
 export interface ShellBridge {
@@ -102,10 +124,12 @@ export interface ShellBridge {
     Array<{
       name: string;
       value: string;
+      values?: Record<string, string>;
       file: string;
       span: { start: number; end: number };
     }>
   >;
+  listTokenModes?: () => Promise<TokenModeItem[]>;
   listStyles?: () => Promise<
     Array<{
       file: string;
@@ -125,7 +149,7 @@ export interface ShellBridge {
     end: number,
     value: string,
   ) => Promise<boolean>;
-  setToken?: (name: string, value: string) => Promise<boolean>;
+  setToken?: (name: string, value: string, mode?: string) => Promise<boolean>;
   createToken?: (name: string, value: string) => Promise<boolean>;
   importImage?: () => Promise<{
     ok: boolean;
@@ -134,6 +158,19 @@ export interface ShellBridge {
     height?: number;
     name?: string;
   }>;
+  gitStatus?: () => Promise<GitStatus>;
+  gitHistory?: () => Promise<GitCommit[]>;
+  gitBranches?: () => Promise<GitBranchList>;
+  gitCreateBranch?: (branch: string) => Promise<boolean>;
+  gitSwitchBranch?: (branch: string) => Promise<boolean>;
+  gitSaveVersion?: (
+    message: string,
+  ) => Promise<{ hash: string; message: string }>;
+  gitPreviewVersion?: (rev: string) => Promise<boolean>;
+  gitExitPreview?: () => Promise<boolean>;
+  gitRestoreVersion?: (rev: string) => Promise<boolean>;
+  loadComments?: () => Promise<CommentsDoc>;
+  saveComments?: (doc: CommentsDoc) => Promise<boolean>;
   onProject: (cb: (payload: ProjectMessage) => void) => void;
   onFiles: (cb: (payload: FilesMessage) => void) => void;
   onDoc: (cb: (payload: DocMessage) => void) => void;
@@ -143,6 +180,9 @@ export interface ShellBridge {
   onZoomChanged?: (cb: (zoom: number) => void) => void;
   onCanvasEdit?: (cb: (payload: unknown) => void) => void;
   onClipboardEdit?: (cb: (payload: unknown) => void) => void;
+  onCommentPlaced?: (cb: (payload: unknown) => void) => void;
+  pushComments?: (threads: CommentThread[]) => void;
+  onCommentSelected?: (cb: (payload: unknown) => void) => void;
   sendResolvedProps?: (
     file: string,
     path: number[],
@@ -151,13 +191,7 @@ export interface ShellBridge {
   zoomTo: (factor: number) => void;
   zoomToFit?: () => void;
   exportPage: (file: string, defaultName: string) => Promise<{ ok: boolean }>;
-  exportNode?: (payload: {
-    file: string;
-    path?: number[];
-    format: "png" | "jpg" | "webp" | "svg" | "pdf";
-    scale: number;
-    defaultName: string;
-  }) => Promise<{ ok: boolean }>;
+  exportNode?: (payload: unknown) => Promise<{ ok: boolean }>;
   bundleProject?: () => Promise<{ ok: boolean; path?: string }>;
   openBundle?: () => Promise<{ ok: boolean; root?: string }>;
   selectPage: (pageId: string) => void;
@@ -177,17 +211,23 @@ export interface ShellBridge {
   toggleFullscreen?: () => void;
   toggleDevtools?: () => void;
   reloadRenderer?: () => void;
+  sendPrototypeMode?: (active: boolean) => void;
+  sendShowHotspots?: (show: boolean) => void;
+  onPrototypeModeChanged?: (cb: (active: boolean) => void) => void;
+  onPageChanged?: (cb: (pageId: string) => void) => void;
 }
 
 interface ProjectMessage {
   root: string;
   manifest: Manifest;
   files: Record<string, string>;
+  components?: ComponentSummaryItem[];
 }
 
 interface FilesMessage {
   files: Record<string, string>;
   manifest?: Manifest;
+  components?: ComponentSummaryItem[];
 }
 
 interface DocMessage {
@@ -208,7 +248,16 @@ export const FRAME_LAYOUT_PROPS: ReadonlySet<string> = new Set([
   "justify",
   "wrap",
   "grid",
+  "mode",
 ]);
+
+export const FRAME_PROTOTYPE_PROPS: Record<string, true> = {
+  onClickNavigate: true,
+  cursor: true,
+  transitionType: true,
+  transitionDuration: true,
+  onHoverStyle: true,
+};
 
 export const SHAPE_APPEARANCE_PROPS: Record<string, true> = {
   fill: true,
@@ -227,7 +276,10 @@ export function shouldRouteToAttrs(
   const isShape = t === "rect" || t === "ellipse" || t === "star";
   if (isShape && SHAPE_APPEARANCE_PROPS[key]) return true;
   const isFrameLike = t === "frame" || t === "section" || t === "group";
-  return isFrameLike && FRAME_LAYOUT_PROPS.has(key);
+  return (
+    isFrameLike &&
+    (FRAME_LAYOUT_PROPS.has(key) || Boolean(FRAME_PROTOTYPE_PROPS[key]))
+  );
 }
 
 const INITIAL: ShellViewWithTokens = {
@@ -246,6 +298,15 @@ const INITIAL: ShellViewWithTokens = {
   notice: null,
   activeTool: "select",
   tokens: [],
+  prototypeMode: false,
+  showHotspots: false,
+  gitStatus: null,
+  history: [],
+  branches: null,
+  isHistoryPreview: false,
+  previewCommit: null,
+  comments: [],
+  activeCommentThreadId: null,
 };
 
 export function toSummary(node: ResolvedNode): SelectionSummary {
@@ -303,11 +364,20 @@ export function toSummary(node: ResolvedNode): SelectionSummary {
           : node.text && node.text.length > 0
             ? "text"
             : undefined;
+  const compName =
+    node.componentName ?? (node.kind === "component" ? node.tag : undefined);
+  const variantProps: Record<string, string | number | boolean> = {};
+  for (const p of node.props ?? []) {
+    if (p.value !== null) variantProps[p.key] = p.value;
+  }
   return {
     id: node.path.join("/"),
     name: node.name ?? node.tag,
     tag: node.tag,
     kind: derivedKind,
+    componentName: compName,
+    variantAxes: node.variantAxes,
+    variantProps,
     editable: !node.generated,
     readOnlyReason: node.generated
       ? "该节点由代码生成，请在代码中修改"
@@ -333,6 +403,10 @@ export function createShellState() {
     for (const listener of listeners) listener(view);
   }
 
+  function pushComments(threads: CommentThread[]) {
+    bridge?.pushComments?.(threads);
+  }
+
   function pageFileOf(pageId: string): string | null {
     const page = view.manifest?.pages.find((entry) => entry.id === pageId);
     return page?.file ?? null;
@@ -355,6 +429,16 @@ export function createShellState() {
     }
     return null;
   }
+  function findLayerNode(layers: LayerNode[], id: string): LayerNode | null {
+    for (const layer of layers) {
+      if (layer.id === id) return layer;
+      if (layer.children.length > 0) {
+        const found = findLayerNode(layer.children, id);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
 
   function toRef(node: ResolvedNode) {
     return {
@@ -368,8 +452,17 @@ export function createShellState() {
   async function refreshTokens() {
     if (!bridge?.listTokens) return;
     try {
-      const tokens = await bridge.listTokens();
-      set({ tokens: tokens ?? [] });
+      const [tokens, tokenModes] = await Promise.all([
+        bridge.listTokens(),
+        bridge.listTokenModes?.(),
+      ]);
+      set({
+        tokens: (tokens ?? []).map((token) => ({
+          ...token,
+          values: token.values ?? {},
+        })),
+        tokenModes: tokenModes ?? [{ name: "default", isDefault: true }],
+      });
     } catch {
       // non-blocking
     }
@@ -418,6 +511,32 @@ export function createShellState() {
       baseVersions: Object.values(versions),
     });
     set({ busy: false });
+  }
+
+  async function applyTokenMode(command: {
+    kind: "addTokenMode" | "renameTokenMode" | "deleteTokenMode";
+    name: string;
+    newName?: string;
+  }) {
+    if (!bridge) return;
+    try {
+      const versions = await bridge.versions();
+      const ok = await bridge.send({
+        kind: "applyCommands",
+        commands: [command],
+        baseVersions: Object.values(versions),
+      });
+      if (!ok) {
+        set({ notice: `更新变量模式失败: ${command.name}` });
+        return;
+      }
+      await refreshTokens();
+      if (selected) await selectNode(selected.ref.file, selected.path);
+    } catch (error) {
+      set({
+        notice: `更新变量模式失败: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
   }
 
   const actions: ShellActionsWithTokens = {
@@ -501,10 +620,19 @@ export function createShellState() {
     refreshTokens: async () => {
       await refreshTokens();
     },
-    setToken: async (name: string, value: string) => {
+    addTokenMode: async (name) =>
+      applyTokenMode({ kind: "addTokenMode", name }),
+    renameTokenMode: async (name, newName) =>
+      applyTokenMode({ kind: "renameTokenMode", name, newName }),
+    deleteTokenMode: async (name) =>
+      applyTokenMode({ kind: "deleteTokenMode", name }),
+    setToken: async (name: string, value: string, mode?: string) => {
       if (!bridge?.setToken) return;
       try {
-        const ok = await bridge.setToken(name, value);
+        const ok =
+          mode === undefined
+            ? await bridge.setToken(name, value)
+            : await bridge.setToken(name, value, mode);
         if (!ok) {
           set({ notice: `更新 Token 失败: ${name}` });
           return;
@@ -568,6 +696,48 @@ export function createShellState() {
       } catch (error) {
         set({
           notice: `分离组件失败: ${error instanceof Error ? error.message : String(error)}`,
+        });
+        return false;
+      }
+    },
+    createComponentInstance: async (
+      componentName: string,
+      position?: { x: number; y: number },
+    ): Promise<boolean> => {
+      const file = view.activePageId ? pageFileOf(view.activePageId) : null;
+      if (!file || !bridge) return false;
+      try {
+        const isFrameTag =
+          selected !== null &&
+          (selected.tag.toLowerCase() === "frame" ||
+            selected.tag.toLowerCase() === "section");
+        const parent =
+          isFrameTag && selected
+            ? { ...toRef(selected), path: selected.path }
+            : null;
+        const x = position?.x ?? 40;
+        const y = position?.y ?? 40;
+        const spec = {
+          kind: "component" as const,
+          componentName,
+          name: componentName,
+          x,
+          y,
+        };
+        await sendCommands([
+          {
+            kind: "createNodes",
+            parent,
+            pageFile: file,
+            index: 0,
+            specs: [spec],
+          },
+        ]);
+        if (view.activePageId) void refreshLayers(view.activePageId);
+        return true;
+      } catch (error) {
+        set({
+          notice: `插入组件实例失败: ${error instanceof Error ? error.message : String(error)}`,
         });
         return false;
       }
@@ -779,6 +949,10 @@ export function createShellState() {
       void sendCommands([{ kind: "ungroupNode", target: toRef(selected) }]);
     },
     createNode: (kind) => {
+      if (kind === "pen") {
+        actions.setTool?.("pen");
+        return;
+      }
       const file = view.activePageId ? pageFileOf(view.activePageId) : null;
       if (!file || !bridge) return;
       const isFrameTag =
@@ -850,7 +1024,13 @@ export function createShellState() {
       });
     },
     exportNode: async (
-      format: "png" | "jpg" | "webp" | "svg" | "pdf",
+      formatOrSettings:
+        | "png"
+        | "jpg"
+        | "webp"
+        | "svg"
+        | "pdf"
+        | ExportSetting[],
       scale = 2,
     ): Promise<boolean> => {
       const file = selected
@@ -866,6 +1046,40 @@ export function createShellState() {
           .pop()
           ?.replace(/\.tsx$/, "") ??
         "export";
+
+      if (Array.isArray(formatOrSettings)) {
+        let settings = formatOrSettings;
+        if (settings.length === 0) {
+          settings = [
+            {
+              id: "default",
+              format: "png",
+              scale: { type: "scale", value: 1 },
+              suffix: "",
+            },
+          ];
+        }
+        try {
+          const res = await bridge.exportNode({
+            file,
+            path: selected?.path,
+            name: baseName,
+            settings,
+            format: settings[0]?.format ?? "png",
+            scale: 1,
+            defaultName: `${baseName}.${settings[0]?.format ?? "png"}`,
+          });
+          if (!res.ok) set({ notice: "导出失败" });
+          return res.ok;
+        } catch (e) {
+          set({
+            notice: `导出失败: ${e instanceof Error ? e.message : String(e)}`,
+          });
+          return false;
+        }
+      }
+
+      const format = formatOrSettings;
       const defaultName = `${baseName}.${format}`;
       try {
         const res = await bridge.exportNode({
@@ -874,6 +1088,15 @@ export function createShellState() {
           format,
           scale,
           defaultName,
+          name: baseName,
+          settings: [
+            {
+              id: "single",
+              format,
+              scale: { type: "scale", value: scale },
+              suffix: "",
+            },
+          ],
         });
         if (!res.ok) set({ notice: `导出 ${format.toUpperCase()} 失败` });
         return res.ok;
@@ -1007,6 +1230,162 @@ export function createShellState() {
         ]);
       })();
     },
+    reparentLayer: (layerId, newParentId, index) => {
+      const file = view.activePageId ? pageFileOf(view.activePageId) : null;
+      if (!file || !bridge) return;
+      void (async () => {
+        try {
+          let targetRef: NodeRefInfo | null =
+            findLayerNode(view.layers, layerId)?.ref ?? null;
+          if (!targetRef) {
+            const targetNode = await bridge.resolveNode(
+              file,
+              layerId.split("/").map(Number),
+            );
+            if (!targetNode) {
+              set({ notice: "目标节点已不在当前源码中" });
+              return;
+            }
+            targetRef = toRef(targetNode);
+          }
+
+          let parentRef: NodeRefInfo | null = null;
+          if (newParentId !== null) {
+            parentRef = findLayerNode(view.layers, newParentId)?.ref ?? null;
+            if (!parentRef) {
+              const parentNode = await bridge.resolveNode(
+                file,
+                newParentId.split("/").map(Number),
+              );
+              if (!parentNode) {
+                set({ notice: "父节点已不在当前源码中" });
+                return;
+              }
+              parentRef = toRef(parentNode);
+            }
+          }
+
+          await sendCommands([
+            {
+              kind: "reparent",
+              target: targetRef,
+              parent: parentRef,
+              pageFile: file,
+              index: Math.max(0, index),
+            },
+          ]);
+          if (view.activePageId) void refreshLayers(view.activePageId);
+        } catch (error) {
+          set({
+            notice: `重新归属父级失败: ${error instanceof Error ? error.message : String(error)}`,
+          });
+        }
+      })();
+    },
+    reorderLayer: (layerId, targetId, position) => {
+      const file = view.activePageId ? pageFileOf(view.activePageId) : null;
+      if (!file || !bridge) return;
+      void (async () => {
+        try {
+          const findNodeAndParent = (
+            nodes: LayerNode[],
+            id: string,
+            parent: LayerNode | null = null,
+          ): {
+            node: LayerNode;
+            parent: LayerNode | null;
+            siblings: LayerNode[];
+          } | null => {
+            for (const node of nodes) {
+              if (node.id === id) {
+                return { node, parent, siblings: nodes };
+              }
+              if (node.children.length > 0) {
+                const found = findNodeAndParent(node.children, id, node);
+                if (found) return found;
+              }
+            }
+            return null;
+          };
+
+          const targetInfo = findNodeAndParent(view.layers, targetId);
+          let newParentId: string | null = null;
+          let calculatedIndex = 0;
+
+          if (targetInfo) {
+            newParentId = targetInfo.parent ? targetInfo.parent.id : null;
+            const siblingsExcludingDragged = targetInfo.siblings.filter(
+              (s) => s.id !== layerId,
+            );
+            const targetIndex = siblingsExcludingDragged.findIndex(
+              (s) => s.id === targetId,
+            );
+            calculatedIndex =
+              position === "before"
+                ? Math.max(0, targetIndex)
+                : targetIndex >= 0
+                  ? targetIndex + 1
+                  : siblingsExcludingDragged.length;
+          } else {
+            const targetPath = targetId.split("/").map(Number);
+            if (targetPath.length > 1) {
+              newParentId = targetPath.slice(0, -1).join("/");
+              const lastIdx = targetPath[targetPath.length - 1] ?? 0;
+              calculatedIndex = position === "before" ? lastIdx : lastIdx + 1;
+            } else {
+              newParentId = null;
+              const lastIdx = targetPath[0] ?? 0;
+              calculatedIndex = position === "before" ? lastIdx : lastIdx + 1;
+            }
+          }
+
+          let targetRef: NodeRefInfo | null =
+            findLayerNode(view.layers, layerId)?.ref ?? null;
+          if (!targetRef) {
+            const draggedNode = await bridge.resolveNode(
+              file,
+              layerId.split("/").map(Number),
+            );
+            if (!draggedNode) {
+              set({ notice: "拖拽节点已不在当前源码中" });
+              return;
+            }
+            targetRef = toRef(draggedNode);
+          }
+
+          let parentRef: NodeRefInfo | null = null;
+          if (newParentId !== null) {
+            parentRef = findLayerNode(view.layers, newParentId)?.ref ?? null;
+            if (!parentRef) {
+              const parentNode = await bridge.resolveNode(
+                file,
+                newParentId.split("/").map(Number),
+              );
+              if (!parentNode) {
+                set({ notice: "父节点已不在当前源码中" });
+                return;
+              }
+              parentRef = toRef(parentNode);
+            }
+          }
+
+          await sendCommands([
+            {
+              kind: "reparent",
+              target: targetRef,
+              parent: parentRef,
+              pageFile: file,
+              index: calculatedIndex,
+            },
+          ]);
+          if (view.activePageId) void refreshLayers(view.activePageId);
+        } catch (error) {
+          set({
+            notice: `重新排列图层失败: ${error instanceof Error ? error.message : String(error)}`,
+          });
+        }
+      })();
+    },
     updateCanvasBounds: (bounds) => {
       bridge?.updateCanvasBounds?.(bounds);
     },
@@ -1014,7 +1393,220 @@ export function createShellState() {
       set({ activeTool: tool });
       bridge?.sendToolChanged?.(tool);
     },
+    setAttrs: (attrs) => {
+      if (!selected) return;
+      void sendCommands([
+        {
+          kind: "setAttrs",
+          target: toRef(selected),
+          attrs,
+        },
+      ]);
+    },
+    togglePrototypeMode: () => {
+      const next = !view.prototypeMode;
+      set({ prototypeMode: next });
+      bridge?.sendPrototypeMode?.(next);
+    },
+    toggleHotspots: () => {
+      const next = !view.showHotspots;
+      set({ showHotspots: next });
+      bridge?.sendShowHotspots?.(next);
+    },
     dismissNotice: () => set({ notice: null }),
+    saveVersion: async (message: string) => {
+      if (!bridge?.gitSaveVersion) return false;
+      try {
+        await bridge.gitSaveVersion(message);
+        if (bridge.gitHistory) {
+          const history = await bridge.gitHistory();
+          set({ history });
+        }
+        if (bridge.gitStatus) {
+          const gitStatus = await bridge.gitStatus();
+          set({ gitStatus });
+        }
+        return true;
+      } catch (err) {
+        set({
+          notice: `保存版本失败: ${err instanceof Error ? err.message : String(err)}`,
+        });
+        return false;
+      }
+    },
+    refreshHistory: async () => {
+      if (bridge?.gitHistory) {
+        const history = await bridge.gitHistory();
+        set({ history });
+      }
+      if (bridge?.gitStatus) {
+        const gitStatus = await bridge.gitStatus();
+        set({ gitStatus });
+      }
+    },
+    previewVersion: async (commit: GitCommit) => {
+      if (!bridge?.gitPreviewVersion) return;
+      await bridge.gitPreviewVersion(commit.hash);
+      set({ isHistoryPreview: true, previewCommit: commit });
+    },
+    exitHistoryPreview: async () => {
+      if (!bridge?.gitExitPreview) return;
+      await bridge.gitExitPreview();
+      set({ isHistoryPreview: false, previewCommit: null });
+    },
+    restoreVersion: async (commit: GitCommit) => {
+      if (!bridge?.gitRestoreVersion) return;
+      await bridge.gitRestoreVersion(commit.hash);
+      set({ isHistoryPreview: false, previewCommit: null });
+    },
+    createBranch: async (branchName: string) => {
+      if (!bridge?.gitCreateBranch) return false;
+      try {
+        await bridge.gitCreateBranch(branchName);
+        if (bridge.gitBranches) {
+          const branches = await bridge.gitBranches();
+          set({ branches });
+        }
+        return true;
+      } catch (err) {
+        set({
+          notice: `创建分支失败: ${err instanceof Error ? err.message : String(err)}`,
+        });
+        return false;
+      }
+    },
+    switchBranch: async (branchName: string) => {
+      if (!bridge?.gitSwitchBranch) return false;
+      try {
+        await bridge.gitSwitchBranch(branchName);
+        if (bridge.gitBranches) {
+          const branches = await bridge.gitBranches();
+          set({ branches });
+        }
+        return true;
+      } catch (err) {
+        set({
+          notice: `切换分支失败: ${err instanceof Error ? err.message : String(err)}`,
+        });
+        return false;
+      }
+    },
+    refreshBranches: async () => {
+      if (bridge?.gitBranches) {
+        const branches = await bridge.gitBranches();
+        set({ branches });
+      }
+    },
+    createCommentThread: async (input) => {
+      const current = view.comments ?? [];
+      const now = new Date().toISOString();
+      const thread: CommentThread = {
+        id: `thread_${Date.now()}`,
+        anchor: input.anchor,
+        messages: [
+          {
+            id: `msg_${Date.now()}`,
+            author: input.author,
+            body: input.body,
+            createdAt: now,
+          },
+        ],
+        resolved: false,
+        createdAt: now,
+        updatedAt: now,
+      };
+      const nextComments = [...current, thread];
+      set({
+        comments: nextComments,
+        activeCommentThreadId: thread.id,
+        commentsTabRequest: (view.commentsTabRequest ?? 0) + 1,
+      });
+      pushComments(nextComments);
+      await bridge?.saveComments?.({ version: 1, threads: nextComments });
+    },
+    replyCommentThread: async (threadId, message) => {
+      const current = view.comments ?? [];
+      const now = new Date().toISOString();
+      const nextComments = current.map((t) => {
+        if (t.id !== threadId) return t;
+        return {
+          ...t,
+          messages: [
+            ...t.messages,
+            {
+              id: `msg_${Date.now()}`,
+              author: message.author,
+              body: message.body,
+              createdAt: now,
+            },
+          ],
+          updatedAt: now,
+        };
+      });
+      set({ comments: nextComments });
+      pushComments(nextComments);
+      await bridge?.saveComments?.({ version: 1, threads: nextComments });
+    },
+    resolveCommentThread: async (threadId, author) => {
+      const current = view.comments ?? [];
+      const now = new Date().toISOString();
+      const nextComments = current.map((t) => {
+        if (t.id !== threadId) return t;
+        return {
+          ...t,
+          resolved: true,
+          resolvedAt: now,
+          resolvedBy: author,
+          updatedAt: now,
+        };
+      });
+      set({ comments: nextComments });
+      pushComments(nextComments);
+      await bridge?.saveComments?.({ version: 1, threads: nextComments });
+    },
+    unresolveCommentThread: async (threadId) => {
+      const current = view.comments ?? [];
+      const now = new Date().toISOString();
+      const nextComments = current.map((t) => {
+        if (t.id !== threadId) return t;
+        const { resolvedAt: _, resolvedBy: __, ...rest } = t;
+        return { ...rest, resolved: false, updatedAt: now };
+      });
+      set({ comments: nextComments });
+      pushComments(nextComments);
+      await bridge?.saveComments?.({ version: 1, threads: nextComments });
+    },
+    deleteCommentThread: async (threadId) => {
+      const current = view.comments ?? [];
+      const nextComments = current.filter((t) => t.id !== threadId);
+      set({
+        comments: nextComments,
+        activeCommentThreadId:
+          view.activeCommentThreadId === threadId
+            ? null
+            : view.activeCommentThreadId,
+      });
+      pushComments(nextComments);
+      await bridge?.saveComments?.({ version: 1, threads: nextComments });
+    },
+    deleteCommentMessage: async (threadId, messageId) => {
+      const current = view.comments ?? [];
+      const nextComments = current
+        .map((t) => {
+          if (t.id !== threadId) return t;
+          return {
+            ...t,
+            messages: t.messages.filter((m) => m.id !== messageId),
+          };
+        })
+        .filter((t) => t.messages.length > 0);
+      set({ comments: nextComments });
+      pushComments(nextComments);
+      await bridge?.saveComments?.({ version: 1, threads: nextComments });
+    },
+    selectCommentThread: (threadId) => {
+      set({ activeCommentThreadId: threadId });
+    },
   };
 
   function applyProject(message: ProjectMessage) {
@@ -1036,9 +1628,20 @@ export function createShellState() {
       activePageId,
       selection: null,
       layers: [],
+      components: message.components ?? [],
     });
     if (activePageId) void refreshLayers(activePageId);
     void refreshTokens();
+    if (bridge?.loadComments) {
+      void bridge
+        .loadComments()
+        .then((doc) => {
+          const threads = doc?.threads ?? [];
+          set({ comments: threads });
+          pushComments(threads);
+        })
+        .catch(() => {});
+    }
   }
 
   if (bridge) {
@@ -1056,7 +1659,12 @@ export function createShellState() {
           view.activePageId && pages.some((p) => p.id === view.activePageId)
             ? view.activePageId
             : (pages[0]?.id ?? null);
-        set({ manifest, pages, activePageId });
+        set({
+          manifest,
+          pages,
+          activePageId,
+          components: message.components ?? view.components,
+        });
       }
       if (view.activePageId) void refreshLayers(view.activePageId);
       if (selected) void selectNode(selected.ref.file, selected.path);
@@ -1122,6 +1730,24 @@ export function createShellState() {
         void sendCommands(edit.commands);
       }
     });
+    bridge.onCommentPlaced?.((payload: unknown) => {
+      const anchor = payload as CommentAnchor;
+      if (anchor) {
+        void actions.createCommentThread?.({
+          anchor,
+          author: "User",
+          body: "新评论",
+        });
+        set({ activeTool: "select" });
+      }
+    });
+    bridge.onCommentSelected?.((payload: unknown) => {
+      const data = payload as { threadId?: string } | null;
+      if (data?.threadId) {
+        actions.selectCommentThread?.(data.threadId);
+        set({ commentsTabRequest: (view.commentsTabRequest ?? 0) + 1 });
+      }
+    });
     bridge.onClipboardEdit?.((payload) => {
       const clip = payload as {
         kind?: "copy" | "cut" | "paste";
@@ -1171,6 +1797,15 @@ export function createShellState() {
             { kind: "deleteNodes", targets: clipboard.map(toRef) },
           ]);
         })();
+      }
+    });
+    bridge.onPrototypeModeChanged?.((active) => {
+      set({ prototypeMode: Boolean(active) });
+    });
+    bridge.onPageChanged?.((pageId) => {
+      if (pageId && view.activePageId !== pageId) {
+        set({ activePageId: pageId });
+        void refreshLayers(pageId);
       }
     });
   }

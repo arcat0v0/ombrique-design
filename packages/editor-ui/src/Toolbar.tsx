@@ -13,12 +13,15 @@ import {
   Loader2Icon,
   Maximize2Icon,
   PackageOpenIcon,
+  PenToolIcon,
+  PlayIcon,
   Redo2Icon,
   SquareIcon,
   StarIcon,
   TypeIcon,
   Undo2Icon,
   UngroupIcon,
+  ZapIcon,
   type LucideIcon,
 } from "lucide-react";
 import { useState } from "react";
@@ -56,6 +59,7 @@ export type InsertKind =
   | "rect"
   | "ellipse"
   | "star"
+  | "pen"
   | "text"
   | "image";
 export interface ToolbarProps {
@@ -93,6 +97,10 @@ export interface ToolbarProps {
   onMinimizeWindow?: () => void;
   onToggleWindowMaximize?: () => void;
   onCloseWindow?: () => void;
+  prototypeMode?: boolean;
+  showHotspots?: boolean;
+  onTogglePrototypeMode?: () => void;
+  onToggleHotspots?: () => void;
 }
 
 const INSERT_TOOLS: Array<{
@@ -104,6 +112,7 @@ const INSERT_TOOLS: Array<{
   { kind: "rect", label: "矩形", icon: SquareIcon },
   { kind: "ellipse", label: "椭圆", icon: CircleIcon },
   { kind: "star", label: "星形", icon: StarIcon },
+  { kind: "pen", label: "钢笔", icon: PenToolIcon },
   { kind: "text", label: "文字", icon: TypeIcon },
   { kind: "image", label: "图片", icon: ImageIcon },
 ];
@@ -143,6 +152,10 @@ export function Toolbar({
   onMinimizeWindow,
   onToggleWindowMaximize,
   onCloseWindow,
+  prototypeMode = false,
+  showHotspots = false,
+  onTogglePrototypeMode,
+  onToggleHotspots,
 }: ToolbarProps) {
   const [componentDialogOpen, setComponentDialogOpen] = useState(false);
   const [componentName, setComponentName] = useState("");
@@ -589,6 +602,58 @@ export function Toolbar({
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+            <Separator orientation="vertical" className="mx-1 h-4" />
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant={showHotspots ? "secondary" : "ghost"}
+                  size="icon-xs"
+                  aria-label="显示热区"
+                  title="显示热区"
+                  disabled={busy}
+                  onClick={onToggleHotspots}
+                  className="size-7"
+                >
+                  <ZapIcon
+                    data-icon="inline-start"
+                    className={
+                      showHotspots ? "text-primary fill-primary/30" : ""
+                    }
+                  />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                <span>{showHotspots ? "隐藏交互热区" : "显示交互热区"}</span>
+              </TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant={prototypeMode ? "default" : "ghost"}
+                  size="xs"
+                  aria-label={prototypeMode ? "退出预览" : "原型预览"}
+                  title={prototypeMode ? "退出预览" : "原型预览"}
+                  disabled={busy}
+                  onClick={onTogglePrototypeMode}
+                  className="h-7 gap-1 px-2 text-xs font-normal"
+                >
+                  <PlayIcon
+                    data-icon="inline-start"
+                    className={prototypeMode ? "fill-current" : ""}
+                  />
+                  <span>{prototypeMode ? "退出" : "预览"}</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                <span>
+                  {prototypeMode ? "退出原型预览 (Esc)" : "运行原型预览 (Play)"}
+                </span>
+              </TooltipContent>
+            </Tooltip>
           </div>
 
           {stats !== null && (

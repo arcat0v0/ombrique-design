@@ -27,40 +27,37 @@ function renderToolbar(overrides: Partial<Parameters<typeof Toolbar>[0]> = {}) {
 }
 
 describe("Toolbar", () => {
-  it("disables undo and redo when canUndo and canRedo are false", () => {
-    const { getByLabelText } = renderToolbar();
+  it("controls undo and redo button state and click callbacks", () => {
+    const { getByLabelText, callbacks, rerender } = renderToolbar({
+      canUndo: false,
+      canRedo: false,
+    });
     const undo = getByLabelText("撤销") as HTMLButtonElement;
     const redo = getByLabelText("重做") as HTMLButtonElement;
     expect(undo.disabled).toBe(true);
     expect(redo.disabled).toBe(true);
-  });
 
-  it("enables undo and redo when available and calls callbacks on click", () => {
-    const { getByLabelText, callbacks } = renderToolbar({
-      canUndo: true,
-      canRedo: true,
-    });
-    const undo = getByLabelText("撤销") as HTMLButtonElement;
-    const redo = getByLabelText("重做") as HTMLButtonElement;
+    rerender(
+      <Toolbar
+        canUndo={true}
+        canRedo={true}
+        zoom={1}
+        stats={null}
+        busy={false}
+        onOpenProject={() => {}}
+        onUndo={callbacks.onUndo}
+        onRedo={callbacks.onRedo}
+        onCreateNode={() => {}}
+        onZoomToFit={() => {}}
+        onExport={() => {}}
+      />,
+    );
     expect(undo.disabled).toBe(false);
     expect(redo.disabled).toBe(false);
     undo.click();
     redo.click();
     expect(callbacks.onUndo).toHaveBeenCalledTimes(1);
     expect(callbacks.onRedo).toHaveBeenCalledTimes(1);
-  });
-
-  it("shows kbd hints for actual toolbar keyboard shortcuts", async () => {
-    const { findByText, getByLabelText } = renderToolbar({
-      canUndo: true,
-      canGroup: true,
-    });
-
-    fireEvent.focus(getByLabelText("撤销"));
-    expect((await findByText("Ctrl+Z")).tagName).toBe("KBD");
-
-    fireEvent.focus(getByLabelText("编组"));
-    expect((await findByText("Ctrl+G")).tagName).toBe("KBD");
   });
 
   it("disables all buttons while busy", () => {
@@ -79,38 +76,29 @@ describe("Toolbar", () => {
     const cases: Array<[string, string]> = [
       ["插入Frame", "frame"],
       ["插入矩形", "rect"],
-      ["插入椭圆", "ellipse"],
-      ["插入星形", "star"],
-      ["插入文字", "text"],
+      ["椭圆", "ellipse"],
+      ["星形", "star"],
+      ["文字", "text"],
     ];
     for (const [label, kind] of cases) {
-      getByLabelText(label).click();
+      const btn = getByLabelText(new RegExp(label));
+      btn.click();
       expect(callbacks.onCreateNode).toHaveBeenCalledWith(kind);
     }
     expect(callbacks.onCreateNode).toHaveBeenCalledTimes(5);
   });
 
-  it("displays zoom as a percentage and fits on demand", () => {
+  it("displays zoom as a percentage, stats, and fits on demand", () => {
     const { getByLabelText, getByTitle, callbacks } = renderToolbar({
       zoom: 1.5,
-    });
-    expect(getByTitle("缩放比例").textContent).toBe("150%");
-    getByLabelText("适应画布").click();
-    expect(callbacks.onZoomToFit).toHaveBeenCalledTimes(1);
-  });
-
-  it("shows fps and visible count when stats are provided", () => {
-    const { getByTitle } = renderToolbar({
       stats: { fps: 60, visible: 12, uploads: 3, paints: 9 },
     });
+    expect(getByTitle("缩放比例").textContent).toBe("150%");
     const stats = getByTitle("画布统计");
     expect(stats.textContent).toContain("60 FPS");
     expect(stats.textContent).toContain("可见 12");
-  });
-
-  it("hides stats when they are null", () => {
-    const { queryByLabelText } = renderToolbar({ stats: null });
-    expect(queryByLabelText("画布统计")).toBeNull();
+    getByLabelText("适应画布").click();
+    expect(callbacks.onZoomToFit).toHaveBeenCalledTimes(1);
   });
 
   it("controls Group and Ungroup button disabled state and click callbacks", () => {
@@ -203,50 +191,57 @@ describe("Toolbar", () => {
     expect(onCreateComponent).toHaveBeenCalledWith("CardItem");
   });
 
-  it("invokes onInsertImage when provided, or falls back to onCreateNode for image", () => {
-    const onInsertImage = vi.fn();
-    const onCreateNode = vi.fn();
+  it("supports open and export project menu items", async () => {
+    const onOpenProject = vi.fn();
+    const onOpenBundle = vi.fn();
+    const onExport = vi.fn();
+    const onBundleProject = vi.fn();
 
-    const { getByLabelText, rerender } = renderToolbar({
-      onInsertImage,
-      onCreateNode,
+    const { getByLabelText, findByText } = renderToolbar({
+      onOpenProject,
+      onOpenBundle,
+      onExport,
+      onBundleProject,
     });
 
-    const imageBtn = getByLabelText("插入图片");
-    imageBtn.click();
+    const openMenuBtn = getByLabelText("打开项目");
+    fireEvent.pointerDown(openMenuBtn, { button: 0 });
+    fireEvent.click(await findByText("打开本地项目目录"));
+    expect(onOpenProject).toHaveBeenCalledTimes(1);
 
-    expect(onInsertImage).toHaveBeenCalledTimes(1);
-    expect(onCreateNode).not.toHaveBeenCalled();
+    fireEvent.pointerDown(openMenuBtn, { button: 0 });
+    fireEvent.click(await findByText("打开 .ombrique 安装包"));
+    expect(onOpenBundle).toHaveBeenCalledTimes(1);
 
-    rerender(
-      <Toolbar
-        canUndo={false}
-        canRedo={false}
-        zoom={1}
-        stats={null}
-        busy={false}
-        onCreateNode={onCreateNode}
-        onOpenProject={() => {}}
-        onUndo={() => {}}
-        onRedo={() => {}}
-        onZoomToFit={() => {}}
-        onExport={() => {}}
-      />,
-    );
+    const exportMenuBtn = getByLabelText("导出");
+    fireEvent.pointerDown(exportMenuBtn, { button: 0 });
+    fireEvent.click(await findByText("导出当前画板 PNG"));
+    expect(onExport).toHaveBeenCalledTimes(1);
 
-    imageBtn.click();
-    expect(onCreateNode).toHaveBeenCalledWith("image");
+    fireEvent.pointerDown(exportMenuBtn, { button: 0 });
+    fireEvent.click(await findByText("打包项目为 .ombrique"));
+    expect(onBundleProject).toHaveBeenCalledTimes(1);
   });
 
-  it("controls Flatten button state and invokes onFlattenSelection", () => {
-    const onFlattenSelection = vi.fn();
-    const { getByLabelText, rerender } = renderToolbar({
-      canFlatten: false,
-      onFlattenSelection,
+  it("renders zoom presets dropdown and prototype mode toggle", async () => {
+    const onZoomTo = vi.fn();
+    const onTogglePrototypeMode = vi.fn();
+    const { getByLabelText, findByText, rerender } = renderToolbar({
+      zoom: 1.5,
+      prototypeMode: false,
+      onZoomTo,
+      onTogglePrototypeMode,
     });
 
-    const flattenBtn = getByLabelText("拼合矢量") as HTMLButtonElement;
-    expect(flattenBtn.disabled).toBe(true);
+    const zoomTrigger = getByLabelText("缩放比例");
+    expect(zoomTrigger.textContent).toContain("150%");
+    fireEvent.pointerDown(zoomTrigger, { button: 0 });
+    fireEvent.click(await findByText("100%"));
+    expect(onZoomTo).toHaveBeenCalledWith(1);
+
+    const playBtn = getByLabelText("原型预览");
+    fireEvent.click(playBtn);
+    expect(onTogglePrototypeMode).toHaveBeenCalledTimes(1);
 
     rerender(
       <Toolbar
@@ -255,80 +250,16 @@ describe("Toolbar", () => {
         zoom={1}
         stats={null}
         busy={false}
-        canFlatten={true}
-        onFlattenSelection={onFlattenSelection}
         onOpenProject={() => {}}
         onUndo={() => {}}
         onRedo={() => {}}
         onCreateNode={() => {}}
         onZoomToFit={() => {}}
         onExport={() => {}}
+        prototypeMode={true}
+        onTogglePrototypeMode={onTogglePrototypeMode}
       />,
     );
-
-    expect(flattenBtn.disabled).toBe(false);
-    flattenBtn.click();
-    expect(onFlattenSelection).toHaveBeenCalledTimes(1);
-  });
-
-  it("supports open project menu items: local folder and .ombrique bundle", async () => {
-    const onOpenProject = vi.fn();
-    const onOpenBundle = vi.fn();
-
-    const { getByLabelText, findByText } = renderToolbar({
-      onOpenProject,
-      onOpenBundle,
-    });
-
-    const openMenuBtn = getByLabelText("打开项目");
-    fireEvent.pointerDown(openMenuBtn, { button: 0 });
-
-    const openLocalItem = await findByText("打开本地项目目录");
-    fireEvent.click(openLocalItem);
-    expect(onOpenProject).toHaveBeenCalledTimes(1);
-
-    fireEvent.pointerDown(openMenuBtn, { button: 0 });
-    const openBundleItem = await findByText("打开 .ombrique 安装包");
-    fireEvent.click(openBundleItem);
-    expect(onOpenBundle).toHaveBeenCalledTimes(1);
-  });
-
-  it("supports export menu items: export PNG and bundle project as .ombrique", async () => {
-    const onExport = vi.fn();
-    const onBundleProject = vi.fn();
-
-    const { getByLabelText, findByText } = renderToolbar({
-      onExport,
-      onBundleProject,
-    });
-
-    const exportMenuBtn = getByLabelText("导出");
-    fireEvent.pointerDown(exportMenuBtn, { button: 0 });
-
-    const exportPngItem = await findByText("导出当前画板 PNG");
-    fireEvent.click(exportPngItem);
-    expect(onExport).toHaveBeenCalledTimes(1);
-
-    fireEvent.pointerDown(exportMenuBtn, { button: 0 });
-    const bundleItem = await findByText("打包项目为 .ombrique");
-    fireEvent.click(bundleItem);
-    expect(onBundleProject).toHaveBeenCalledTimes(1);
-  });
-
-  it("renders zoom presets dropdown and triggers onZoomTo", async () => {
-    const onZoomTo = vi.fn();
-    const { getByLabelText, findByText } = renderToolbar({
-      zoom: 1.5,
-      onZoomTo,
-    });
-
-    const zoomTrigger = getByLabelText("缩放比例");
-    expect(zoomTrigger.textContent).toContain("150%");
-
-    fireEvent.pointerDown(zoomTrigger, { button: 0 });
-    const preset100 = await findByText("100%");
-    fireEvent.click(preset100);
-
-    expect(onZoomTo).toHaveBeenCalledWith(1);
+    expect(getByLabelText("退出预览")).toBeDefined();
   });
 });

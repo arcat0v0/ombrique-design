@@ -5,6 +5,7 @@ export type {
   FrameAlign,
   FrameJustify,
   FrameGrid,
+  PrototypeTransitionType,
 } from "./Frame";
 export { Group } from "./Group";
 export type { GroupProps } from "./Group";
@@ -20,6 +21,8 @@ export { Star } from "./Star";
 export type { StarProps } from "./Star";
 export { Vector } from "./Vector";
 export type { VectorProps } from "./Vector";
+export { Path } from "./Path";
+export type { PathProps } from "./Path";
 export { Boolean } from "./Boolean";
 export type { BooleanOp, BooleanProps } from "./Boolean";
 export { starPoints, starVertices } from "./starMath";

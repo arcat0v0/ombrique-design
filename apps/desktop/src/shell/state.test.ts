@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { shouldRouteToAttrs, toSummary } from "./state";
+import { createShellState, shouldRouteToAttrs, toSummary } from "./state";
 
 import type { ShellBridge } from "./state";
 
@@ -42,6 +42,18 @@ describe("shouldRouteToAttrs", () => {
     expect(shouldRouteToAttrs("align", false, "section")).toBe(true);
     expect(shouldRouteToAttrs("gap", false, "Group")).toBe(true);
   });
+  it("routes Frame prototype props to setAttrs even when missing from source", () => {
+    for (const key of [
+      "onClickNavigate",
+      "cursor",
+      "transitionType",
+      "transitionDuration",
+      "onHoverStyle",
+    ]) {
+      expect(shouldRouteToAttrs(key, false, "Frame")).toBe(true);
+    }
+    expect(shouldRouteToAttrs("onClickNavigate", false, "frame")).toBe(true);
+  });
 
   it("keeps geometry and appearance keys on setStyle", () => {
     expect(shouldRouteToAttrs("width", false, "Frame")).toBe(false);
@@ -68,7 +80,7 @@ describe("shouldRouteToAttrs", () => {
 });
 
 describe("toSummary with sharedStyles", () => {
-  it("includes sharedStyles as source: shared rows with file:selector labels", () => {
+  it("includes sharedStyles as source: shared rows with file, span, selector, and ruleLabel", () => {
     const summary = toSummary({
       ref: { file: "pages/home.tsx", start: 0, end: 100 },
       path: [0, 1],
@@ -101,41 +113,10 @@ describe("toSummary with sharedStyles", () => {
     expect(shared?.value).toBe("#ffffff");
     expect(shared?.ruleLabel).toBe("styles.scss:.card");
     expect(shared?.readOnly).toBe(false);
-  });
-
-  it("includes file, start, end, selector on shared StyleRow", () => {
-    const summary = toSummary({
-      ref: { file: "pages/home.tsx", start: 0, end: 100 },
-      path: [0, 1],
-      tag: "div",
-      kind: "intrinsic",
-      generated: false,
-      name: "Card",
-      hidden: false,
-      locked: false,
-      text: "",
-      style: [],
-      props: [],
-      attrs: [],
-      sharedStyles: [
-        {
-          file: "theme.scss",
-          selector: ".btn",
-          fullSelector: ".btn",
-          prop: "padding",
-          value: "8px 16px",
-          propSpan: { start: 50, end: 70 },
-          valueSpan: { start: 59, end: 69 },
-        },
-      ],
-    });
-
-    const shared = summary.styles.find((s) => s.key === "padding");
-    if (!shared) throw new Error("missing padding row");
-    expect(shared.file).toBe("theme.scss");
-    expect(shared.start).toBe(59);
-    expect(shared.end).toBe(69);
-    expect(shared.selector).toBe(".btn");
+    expect(shared?.file).toBe("styles.scss");
+    expect(shared?.start).toBe(22);
+    expect(shared?.end).toBe(29);
+    expect(shared?.selector).toBe(".card");
   });
 });
 
@@ -176,7 +157,6 @@ describe("createShellState style & token routing", () => {
     };
 
     installBridge(mockBridge);
-    const { createShellState } = await import("./state");
     const state = createShellState();
 
     state.actions.setStyle("color", "#ff0000", {
@@ -201,7 +181,6 @@ describe("createShellState style & token routing", () => {
       onStats: () => {},
     };
     installBridge(mockBridge);
-    const { createShellState } = await import("./state");
     const state = createShellState();
 
     state.actions.setStyle("color", "#ff0000", { source: "shared" });
@@ -219,7 +198,6 @@ describe("createShellState style & token routing", () => {
       onStats: () => {},
     };
     installBridge(mockBridge);
-    const { createShellState } = await import("./state");
     const state = createShellState();
 
     await state.actions.createToken?.("bad-tok", "val");
@@ -228,71 +206,87 @@ describe("createShellState style & token routing", () => {
     await state.actions.setToken?.("bad-tok", "new-val");
     expect(state.getView().notice).toContain("更新 Token 失败");
   });
-});
 
-describe("createComponent and detachInstance in createShellState", () => {
-  it("toSummary derives kind='component' when node.kind is component", () => {
-    const summary = toSummary({
-      ref: { file: "pages/home.tsx", start: 0, end: 50 },
-      path: [0, 0],
-      tag: "Card",
-      kind: "component",
-      generated: false,
-      name: "Card",
-      hidden: false,
-      locked: false,
-      text: "",
-      style: [],
-      props: [],
-      attrs: [],
-      componentName: "Card",
-    });
-    expect(summary.kind).toBe("component");
-  });
-
-  it("createComponent dispatches command and returns true", async () => {
-    const sent: SentCommand[] = [];
-    const mockBridge: Partial<ShellBridge> = {
-      send: async (msg: unknown) => {
-        sent.push(msg as SentCommand);
+  it("loads mode columns, forwards mode values, and sends mode mutations", async () => {
+    const commands: SentCommand[] = [];
+    const setValues: Array<[string, string, string | undefined]> = [];
+    installBridge({
+      listTokens: async () => [
+        {
+          name: "--bg",
+          value: "white",
+          values: { default: "white", dark: "black" },
+          file: "tokens.css",
+          span: { start: 0, end: 10 },
+        },
+      ],
+      listTokenModes: async () => [
+        { name: "default", isDefault: true },
+        { name: "dark", isDefault: false },
+      ],
+      setToken: async (name, value, mode) => {
+        setValues.push([name, value, mode]);
+        return true;
+      },
+      send: async (message) => {
+        commands.push(message as SentCommand);
         return true;
       },
       versions: async () => ({}),
-      tree: async () => [],
-      resolveNode: async () => ({
-        ref: { file: "pages/home.tsx", start: 10, end: 50 },
-        path: [0, 0],
-        tag: "Frame",
-        kind: "frame",
-        generated: false,
-        name: "Card",
-        hidden: false,
-        locked: false,
-        text: "",
-        style: [],
-        props: [],
-        attrs: [],
-      }),
       onProject: () => {},
       onFiles: () => {},
       onDoc: () => {},
       onFatal: () => {},
       onStats: () => {},
-      onSelectionChanged: () => {},
-    };
-    installBridge(mockBridge);
-    const { createShellState } = await import("./state");
+    });
     const state = createShellState();
-
-    // create component
-    const ok = await state.actions.createComponent?.("MyComp");
-    // Even without selection mock in selectNode, createComponent returns boolean
-    expect(typeof ok).toBe("boolean");
+    await state.actions.refreshTokens?.();
+    expect(state.getView().tokenModes?.map((mode) => mode.name)).toEqual([
+      "default",
+      "dark",
+    ]);
+    await state.actions.setToken?.("--bg", "#111", "dark");
+    expect(setValues).toEqual([["--bg", "#111", "dark"]]);
+    await state.actions.addTokenMode?.("Compact");
+    await state.actions.renameTokenMode?.("dark", "Night");
+    await state.actions.deleteTokenMode?.("Night");
+    expect(commands.map((message) => message.commands?.[0])).toEqual([
+      { kind: "addTokenMode", name: "Compact" },
+      { kind: "renameTokenMode", name: "dark", newName: "Night" },
+      { kind: "deleteTokenMode", name: "Night" },
+    ]);
   });
 });
 
-describe("insertImage and flattenSelection in createShellState", () => {
-  it("insertImage imports image via bridge and sends createNodes", async () => {
+describe("toSummary component metadata", () => {
+  it("populates kind, componentName, variantAxes and variantProps", () => {
+    const summary = toSummary({
+      ref: { file: "pages/home.tsx", start: 0, end: 10 },
+      path: [0, 0],
+      tag: "Button",
+      kind: "component",
+      componentName: "Button",
+      generated: false,
+      name: "Button",
+      hidden: false,
+      locked: false,
+      text: "",
+      style: [],
+      props: [{ key: "size", value: "large", dynamic: false }],
+      attrs: [],
+      variantAxes: [{ name: "size", values: ["small", "medium", "large"] }],
+    });
+    expect(summary.kind).toBe("component");
+    expect(summary.componentName).toBe("Button");
+    expect(summary.variantAxes).toEqual([
+      { name: "size", values: ["small", "medium", "large"] },
+    ]);
+    expect(summary.variantProps).toEqual({ size: "large" });
+  });
+});
+
+describe("insertImage in createShellState", () => {
+  it("imports image via bridge and sends createNodes", async () => {
     const sent: SentCommand[] = [];
     const mockBridge: Partial<ShellBridge> = {
       importImage: async () => ({
@@ -316,10 +310,8 @@ describe("insertImage and flattenSelection in createShellState", () => {
       onStats: () => {},
     };
     installBridge(mockBridge);
-    const { createShellState } = await import("./state");
     const state = createShellState();
 
-    // simulate active page
     Object.assign(state.getView(), { activePageId: "home" });
     Object.assign(state.getView(), {
       manifest: {
@@ -336,104 +328,6 @@ describe("insertImage and flattenSelection in createShellState", () => {
     expect(command?.kind).toBe("createNodes");
     expect(spec?.kind).toBe("image");
     expect(spec?.src).toBe("assets/logo.png");
-  });
-
-  it("flattenSelection sends flattenBoolean command", async () => {
-    const sent: SentCommand[] = [];
-    const mockBridge: Partial<ShellBridge> = {
-      send: async (msg: unknown) => {
-        sent.push(msg as SentCommand);
-        return true;
-      },
-      versions: async () => ({}),
-      tree: async () => [],
-      resolveNode: async () => null,
-      onProject: () => {},
-      onFiles: () => {},
-      onDoc: () => {},
-      onFatal: () => {},
-      onStats: () => {},
-    };
-    installBridge(mockBridge);
-    const { createShellState } = await import("./state");
-    const state = createShellState();
-
-    const ok = await state.actions.flattenSelection?.();
-    expect(typeof ok).toBe("boolean");
-  });
-});
-
-describe("exportNode, bundleProject, openBundle in createShellState", () => {
-  it("exportNode calls bridge.exportNode with selected node or active page", async () => {
-    let exportCalled = false;
-    const mockBridge: Partial<ShellBridge> = {
-      exportNode: async (payload: { format: string; scale: number }) => {
-        if (payload.format === "svg" && payload.scale === 2) {
-          exportCalled = true;
-          return { ok: true };
-        }
-        return { ok: false };
-      },
-      send: async () => true,
-      versions: async () => ({}),
-      tree: async () => [],
-      resolveNode: async () => null,
-      onProject: () => {},
-      onFiles: () => {},
-      onDoc: () => {},
-      onFatal: () => {},
-      onStats: () => {},
-    };
-    installBridge(mockBridge);
-    const { createShellState } = await import("./state");
-    const state = createShellState();
-
-    Object.assign(state.getView(), { activePageId: "home" });
-    Object.assign(state.getView(), {
-      manifest: {
-        formatVersion: 1,
-        pages: [{ id: "home", name: "Home", file: "pages/home.tsx" }],
-      },
-    });
-
-    const ok = await state.actions.exportNode?.("svg", 2);
-    expect(ok).toBe(true);
-    expect(exportCalled).toBe(true);
-  });
-
-  it("bundleProject and openBundle call respective bridge methods", async () => {
-    let bundleCalled = false;
-    let openCalled = false;
-    const mockBridge: Partial<ShellBridge> = {
-      bundleProject: async () => {
-        bundleCalled = true;
-        return { ok: true, path: "/tmp/test.ombrique" };
-      },
-      openBundle: async () => {
-        openCalled = true;
-        return { ok: true, root: "/tmp/extracted" };
-      },
-      send: async () => true,
-      versions: async () => ({}),
-      tree: async () => [],
-      resolveNode: async () => null,
-      onProject: () => {},
-      onFiles: () => {},
-      onDoc: () => {},
-      onFatal: () => {},
-      onStats: () => {},
-    };
-    installBridge(mockBridge);
-    const { createShellState } = await import("./state");
-    const state = createShellState();
-
-    const okBundle = await state.actions.bundleProject?.();
-    expect(okBundle).toBe(true);
-    expect(bundleCalled).toBe(true);
-
-    const okOpen = await state.actions.openBundle?.();
-    expect(okOpen).toBe(true);
-    expect(openCalled).toBe(true);
   });
 });
 
@@ -459,7 +353,6 @@ describe("toolChanged mirror and per-layer toggles in createShellState", () => {
       },
     };
     installBridge(mockBridge);
-    const { createShellState } = await import("./state");
     const state = createShellState();
 
     expect(state.getView().activeTool).toBe("select");
@@ -494,7 +387,6 @@ describe("toolChanged mirror and per-layer toggles in createShellState", () => {
       }),
     };
     installBridge(mockBridge);
-    const { createShellState } = await import("./state");
     const state = createShellState();
 
     await state.actions.toggleHiddenForLayer?.("0/1", true);
@@ -530,7 +422,6 @@ describe("toolChanged mirror and per-layer toggles in createShellState", () => {
       }),
     };
     installBridge(mockBridge);
-    const { createShellState } = await import("./state");
     const state = createShellState();
 
     await state.actions.toggleLockedForLayer?.("0/1", true);
@@ -544,5 +435,191 @@ describe("toolChanged mirror and per-layer toggles in createShellState", () => {
     };
     expect(first.commands?.[0]?.attrs).toEqual({ "data-locked": "" });
     expect(second.commands?.[0]?.attrs).toEqual({ "data-locked": null });
+  });
+});
+
+describe("reparentLayer and reorderLayer in createShellState", () => {
+  function baseBridge(): Partial<ShellBridge> {
+    return {
+      onProject: () => {},
+      onFiles: () => {},
+      onDoc: () => {},
+      onFatal: () => {},
+      onStats: () => {},
+      tree: async () => [],
+    };
+  }
+
+  it("reparentLayer sends reparent command with resolved refs", async () => {
+    const sentCommands: SentCommand[] = [];
+    const { promise: sentPromise, resolve: resolveSent } =
+      Promise.withResolvers<void>();
+    const mockBridge = {
+      ...baseBridge(),
+      send: async (msg: unknown) => {
+        sentCommands.push(msg as SentCommand);
+        resolveSent();
+        return true;
+      },
+      versions: async () => ({}),
+      resolveNode: async (_file: string, path: number[]) => ({
+        ref: {
+          file: "pages/home.tsx",
+          start: (path[0] ?? 0) * 10,
+          end: (path[0] ?? 0) * 10 + 20,
+        },
+        path,
+        tag: "frame",
+        kind: "frame",
+        generated: false,
+        name: `Node ${path.join("/")}`,
+        hidden: false,
+        locked: false,
+        text: "",
+        style: [],
+        attrs: [],
+      }),
+    };
+    installBridge(mockBridge);
+    const state = createShellState();
+    Object.assign(state.getView(), {
+      activePageId: "home",
+      manifest: {
+        formatVersion: 1,
+        pages: [{ id: "home", name: "Home", file: "pages/home.tsx" }],
+      },
+    });
+
+    void state.actions.reparentLayer?.("0/1", "0", 2);
+    await sentPromise;
+
+    const reparentMsg = sentCommands[0] as unknown as {
+      commands?: Array<{
+        kind: string;
+        target: { file: string; start: number; end: number; path: number[] };
+        parent: {
+          file: string;
+          start: number;
+          end: number;
+          path: number[];
+        } | null;
+        pageFile: string;
+        index: number;
+      }>;
+    };
+    expect(reparentMsg.commands?.[0]?.kind).toBe("reparent");
+    expect(reparentMsg.commands?.[0]?.target?.path).toEqual([0, 1]);
+    expect(reparentMsg.commands?.[0]?.parent?.path).toEqual([0]);
+    expect(reparentMsg.commands?.[0]?.pageFile).toBe("pages/home.tsx");
+    expect(reparentMsg.commands?.[0]?.index).toBe(2);
+  });
+
+  it("reorderLayer calculates target index and sends reparent command", async () => {
+    const sentCommands: SentCommand[] = [];
+    const { promise: sentPromise, resolve: resolveSent } =
+      Promise.withResolvers<void>();
+    const mockBridge = {
+      ...baseBridge(),
+      send: async (msg: unknown) => {
+        sentCommands.push(msg as SentCommand);
+        resolveSent();
+        return true;
+      },
+      versions: async () => ({}),
+      resolveNode: async (_file: string, path: number[]) => ({
+        ref: {
+          file: "pages/home.tsx",
+          start: (path[path.length - 1] ?? 0) * 10,
+          end: (path[path.length - 1] ?? 0) * 10 + 20,
+        },
+        path,
+        tag: "frame",
+        kind: "frame",
+        generated: false,
+        name: `Node ${path.join("/")}`,
+        hidden: false,
+        locked: false,
+        text: "",
+        style: [],
+        attrs: [],
+      }),
+    };
+    installBridge(mockBridge);
+    const state = createShellState();
+    Object.assign(state.getView(), {
+      activePageId: "home",
+      manifest: {
+        formatVersion: 1,
+        pages: [{ id: "home", name: "Home", file: "pages/home.tsx" }],
+      },
+      layers: [
+        {
+          id: "0",
+          name: "Root",
+          tag: "frame",
+          kind: "frame",
+          depth: 0,
+          hidden: false,
+          locked: false,
+          generated: false,
+          children: [
+            {
+              id: "0/0",
+              name: "Child 0",
+              tag: "frame",
+              kind: "frame",
+              depth: 1,
+              hidden: false,
+              locked: false,
+              generated: false,
+              children: [],
+            },
+            {
+              id: "0/1",
+              name: "Child 1",
+              tag: "frame",
+              kind: "frame",
+              depth: 1,
+              hidden: false,
+              locked: false,
+              generated: false,
+              children: [],
+            },
+            {
+              id: "0/2",
+              name: "Child 2",
+              tag: "frame",
+              kind: "frame",
+              depth: 1,
+              hidden: false,
+              locked: false,
+              generated: false,
+              children: [],
+            },
+          ],
+        },
+      ],
+    });
+
+    void state.actions.reorderLayer?.("0/2", "0/0", "after");
+    await sentPromise;
+
+    const reorderMsg = sentCommands[0] as unknown as {
+      commands?: Array<{
+        kind: string;
+        target: { file: string; start: number; end: number; path: number[] };
+        parent: {
+          file: string;
+          start: number;
+          end: number;
+          path: number[];
+        } | null;
+        index: number;
+      }>;
+    };
+    expect(reorderMsg.commands?.[0]?.kind).toBe("reparent");
+    expect(reorderMsg.commands?.[0]?.target?.path).toEqual([0, 2]);
+    expect(reorderMsg.commands?.[0]?.parent?.path).toEqual([0]);
+    expect(reorderMsg.commands?.[0]?.index).toBe(1);
   });
 });

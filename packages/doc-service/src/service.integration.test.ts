@@ -488,6 +488,56 @@ describe("DocumentService layout props & constraints", () => {
     expect(afterRedo).toContain("--brand-blue: #004499;");
   });
 
+  it("writes mode commands to a real project and restores mode references with undo", () => {
+    service.apply([{ kind: "createToken", name: "bg", value: "white" }], []);
+    service.apply([{ kind: "addTokenMode", name: "dark" }], []);
+    service.apply(
+      [{ kind: "setTokenValue", name: "bg", value: "black", mode: "dark" }],
+      [],
+    );
+    const frame = service.project.index.pages[0]?.root;
+    if (!frame) throw new Error("missing root Frame");
+    service.apply(
+      [{ kind: "setAttrs", target: frame.ref, attrs: { mode: "dark" } }],
+      [],
+    );
+    const beforeRename = readFileSync(join(root, "tokens.css"), "utf8");
+    expect(beforeRename).toBe(
+      ':root {\n  --bg: white;\n}\n\n[data-mode="dark"] {\n  --bg: black;\n}\n',
+    );
+    const renamed = service.apply(
+      [{ kind: "renameTokenMode", name: "dark", newName: "Night" }],
+      [],
+    );
+    expect(renamed.changedFiles).toEqual(
+      expect.arrayContaining(["tokens.css", "pages/home.tsx"]),
+    );
+    expect(readFileSync(join(root, "tokens.css"), "utf8")).toContain(
+      '[data-mode="Night"]',
+    );
+    expect(readFileSync(join(root, "pages/home.tsx"), "utf8")).toContain(
+      'mode="Night"',
+    );
+    service.apply([{ kind: "deleteTokenMode", name: "Night" }], []);
+    expect(readFileSync(join(root, "tokens.css"), "utf8")).toBe(
+      ":root {\n  --bg: white;\n}\n",
+    );
+    expect(readFileSync(join(root, "pages/home.tsx"), "utf8")).not.toContain(
+      "mode=",
+    );
+    service.undo();
+    expect(readFileSync(join(root, "pages/home.tsx"), "utf8")).toContain(
+      'mode="Night"',
+    );
+    expect(
+      service.project.index.styles.tokens.modes.map((mode) => mode.name),
+    ).toEqual(["default", "Night"]);
+    service.redo();
+    expect(readFileSync(join(root, "tokens.css"), "utf8")).not.toContain(
+      "data-mode",
+    );
+  });
+
   it("updates shared styles in scss files with undo/redo", () => {
     const dir = mkdtempSync(join(tmpdir(), "ombrique-shared-style-"));
     writeFileSync(

@@ -81,23 +81,6 @@ export default function P() {
     expect(children[1]?.kind).toBe("group");
   });
 
-  it("exposes layout props (layout/gap/align/justify/grid columns) via style rows", () => {
-    const file = parseDesignFile(
-      "pages/test.tsx",
-      `import { Frame } from "@ombrique/runtime";
-export default function P() {
-  return (
-    <Frame name="F" width={400} height={300} layout="vertical" gap={12} align="center" justify="space-between" wrap />
-  );
-}`,
-    );
-    expect(file.root).not.toBeNull();
-    const layer = toLayer(requireRoot(file));
-    const tags = layer.children as unknown[];
-    void tags;
-    const props = (layer as { name: string }).name;
-    expect(props).toBe("F");
-  });
   it("falls back to tag name when text is empty", () => {
     const file = parseDesignFile(
       "pages/test.tsx",

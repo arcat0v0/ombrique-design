@@ -1,5 +1,9 @@
 import { DocumentService } from "@ombrique/doc-service";
-import { locateByPath, type DesignElement } from "@ombrique/source";
+import {
+  extractVariantAxes,
+  locateByPath,
+  type DesignElement,
+} from "@ombrique/source";
 import { toLayer } from "./layer-tree.js";
 import { createDesignCompiler, type DesignCompiler } from "@ombrique/compiler";
 import type { DocToShell, EditCommand, ShellToDoc } from "@ombrique/protocol";
@@ -44,7 +48,13 @@ async function handle(message: ShellToDoc) {
     await ensureCompiler(message.path);
     const files: Record<string, string> = {};
     for (const [file, state] of service.project.files) files[file] = state.text;
-    send({ type: "project", root: message.path, manifest, files });
+    send({
+      type: "project",
+      root: message.path,
+      manifest,
+      files,
+      components: componentSummaries(service),
+    });
     return;
   }
 
@@ -53,29 +63,22 @@ async function handle(message: ShellToDoc) {
   if (message.kind === "applyCommands") {
     const commands: EditCommand[] = message.commands;
     const transaction = service.apply(commands, message.baseVersions);
-    send({
-      type: "files",
-      files: snapshotFiles(service),
-      manifest: service.project.manifest,
-    });
+    send({ type: "files", ...fileSnapshot(service) });
     return transaction;
   }
   if (message.kind === "undo") {
     service.undo();
-    send({
-      type: "files",
-      files: snapshotFiles(service),
-      manifest: service.project.manifest,
-    });
+    send({ type: "files", ...fileSnapshot(service) });
     return;
   }
   if (message.kind === "redo") {
     service.redo();
-    send({
-      type: "files",
-      files: snapshotFiles(service),
-      manifest: service.project.manifest,
-    });
+    send({ type: "files", ...fileSnapshot(service) });
+    return;
+  }
+  if (message.kind === "restoreVersion") {
+    service.restoreVersion(message.files);
+    send({ type: "files", ...fileSnapshot(service) });
     return;
   }
 }
@@ -84,6 +87,20 @@ function snapshotFiles(current: DocumentService): Record<string, string> {
   const files: Record<string, string> = {};
   for (const [file, state] of current.project.files) files[file] = state.text;
   return files;
+}
+
+function fileSnapshot(current: DocumentService) {
+  return {
+    files: snapshotFiles(current),
+    manifest: current.project.manifest,
+    components: componentSummaries(current),
+  };
+}
+
+function componentSummaries(current: DocumentService) {
+  return current.project.index.components.map(
+    ({ name, file, frameName, axes }) => ({ name, file, frameName, axes }),
+  );
 }
 
 function sharedStylesFor(
@@ -219,6 +236,18 @@ port.on("message", async (event) => {
               sharedStyles: sharedStylesFor(service, element),
               componentName:
                 element.kind === "component" ? element.tag : undefined,
+              variantAxes: (() => {
+                if (element.kind !== "component") return undefined;
+                const compCode =
+                  service.project.files.get(`components/${element.tag}.tsx`)
+                    ?.text ??
+                  service.project.index.sources.get(
+                    `components/${element.tag}.tsx`,
+                  ) ??
+                  service.project.files.get(`${element.tag}.tsx`)?.text ??
+                  service.project.index.sources.get(`${element.tag}.tsx`);
+                return compCode ? extractVariantAxes(compCode) : undefined;
+              })(),
             }
           : null,
       });
@@ -253,26 +282,13 @@ port.on("message", async (event) => {
   if (data.type === "tokens") {
     try {
       if (!service) throw new Error("no project open");
-      const sheet = service.project.index.styles.files.get("tokens.css");
-      const tokens: Array<{
-        name: string;
-        value: string;
-        file: string;
-        span: { start: number; end: number };
-      }> = [];
-      if (sheet) {
-        for (const rule of sheet.rules) {
-          for (const decl of rule.decls) {
-            tokens.push({
-              name: decl.prop,
-              value: decl.value,
-              file: "tokens.css",
-              span: decl.propSpan,
-            });
-          }
-        }
-      }
-      send({ type: "tokensResult", id: data.id, tokens });
+      const { tokens, modes } = service.project.index.styles.tokens;
+      send({
+        type: "tokensResult",
+        id: data.id,
+        tokens,
+        modes: modes.map(({ name, isDefault }) => ({ name, isDefault })),
+      });
     } catch (error) {
       send({ type: "tokensResult", id: data.id, error: String(error) });
     }

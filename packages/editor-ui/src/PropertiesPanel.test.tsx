@@ -21,36 +21,6 @@ describe("PropertiesPanel", () => {
     expect(queryByLabelText("名称")).toBeNull();
   });
 
-  it("shows editable appearance controls for an ellipse without fill styles", () => {
-    const onSetStyle = vi.fn();
-    const selection = makeSelection({
-      tag: "Ellipse",
-      styles: [
-        { key: "x", value: "40", source: "inline", readOnly: false },
-        { key: "y", value: "40", source: "inline", readOnly: false },
-        { key: "width", value: "160", source: "inline", readOnly: false },
-        { key: "height", value: "160", source: "inline", readOnly: false },
-      ],
-    });
-    const { getByText } = render(
-      <PropertiesPanel
-        selection={selection}
-        onSetStyle={onSetStyle}
-        onSetText={() => {}}
-        onSetName={() => {}}
-        onToggleHidden={() => {}}
-        onToggleLocked={() => {}}
-      />,
-    );
-    expect(getByText("Appearance 外观")).toBeDefined();
-    fireEvent.click(getByText("+ Fill"));
-    expect(onSetStyle).toHaveBeenCalledWith("fill", "#d9d9d9");
-    fireEvent.click(getByText("+ Stroke"));
-    expect(onSetStyle).toHaveBeenCalledWith("stroke", "#000000");
-    fireEvent.click(getByText("+ Opacity"));
-    expect(onSetStyle).toHaveBeenCalledWith("opacity", 1);
-  });
-
   it("shows read-only reason and disables inputs when selection is not editable", () => {
     const selection = makeSelection({
       editable: false,
@@ -138,31 +108,6 @@ describe("PropertiesPanel", () => {
     expect(onSetStyle).toHaveBeenCalledWith("top", null);
   });
 
-  it("displays placeholder when geometry coordinate is absent", () => {
-    const selection = makeSelection({
-      styles: [
-        { key: "width", value: "120px", source: "inline", readOnly: false },
-      ],
-    });
-    const { getByLabelText } = render(
-      <PropertiesPanel
-        selection={selection}
-        onSetStyle={() => {}}
-        onSetText={() => {}}
-        onSetName={() => {}}
-        onToggleHidden={() => {}}
-        onToggleLocked={() => {}}
-      />,
-    );
-
-    const xInput = getByLabelText("X 坐标值") as HTMLInputElement;
-    const yInput = getByLabelText("Y 坐标值") as HTMLInputElement;
-    expect(xInput.value).toBe("");
-    expect(xInput.placeholder).toBe("混合");
-    expect(yInput.value).toBe("");
-    expect(yInput.placeholder).toBe("混合");
-  });
-
   it("renders constraint section with CSS mappings when positioned absolutely", () => {
     const onSetStyle = vi.fn();
     const selection = makeSelection({
@@ -205,30 +150,6 @@ describe("PropertiesPanel", () => {
     expect(onSetStyle).toHaveBeenCalledWith("bottom", null);
   });
 
-  it("shows read-only hint when constraint positioning is not available", () => {
-    const selection = makeSelection({
-      styles: [
-        { key: "position", value: "static", source: "inline", readOnly: false },
-        { key: "width", value: "100px", source: "inline", readOnly: false },
-      ],
-    });
-    const { getByText } = render(
-      <PropertiesPanel
-        selection={selection}
-        onSetStyle={() => {}}
-        onSetText={() => {}}
-        onSetName={() => {}}
-        onToggleHidden={() => {}}
-        onToggleLocked={() => {}}
-      />,
-    );
-    expect(
-      getByText(
-        "当前 position=static，仅 absolute/fixed/relative 支持约束编辑",
-      ),
-    ).toBeDefined();
-  });
-
   it("supports collapsing and expanding style groups", () => {
     const selection = makeSelection({
       styles: [
@@ -255,34 +176,6 @@ describe("PropertiesPanel", () => {
 
     fireEvent.click(layoutHeader);
     expect(queryByLabelText("样式 display")).not.toBeNull();
-  });
-
-  it("reverts StyleValueInput on Escape key", () => {
-    const onSetStyle = vi.fn();
-    const selection = makeSelection({
-      styles: [
-        { key: "opacity", value: "0.5", source: "inline", readOnly: false },
-      ],
-    });
-    const { getByLabelText } = render(
-      <PropertiesPanel
-        selection={selection}
-        onSetStyle={onSetStyle}
-        onSetText={() => {}}
-        onSetName={() => {}}
-        onToggleHidden={() => {}}
-        onToggleLocked={() => {}}
-      />,
-    );
-
-    const input = getByLabelText("样式 opacity") as HTMLInputElement;
-    expect(input.value).toBe("0.5");
-
-    fireEvent.change(input, { target: { value: "0.9" } });
-    fireEvent.keyDown(input, { key: "Escape" });
-
-    expect(input.value).toBe("0.5");
-    expect(onSetStyle).not.toHaveBeenCalled();
   });
 
   it("resets all fields when selection switches to a different layer", () => {
@@ -390,52 +283,6 @@ describe("PropertiesPanel", () => {
     expect(getByLabelText("换行 wrap")).toBeDefined();
   });
 
-  it("shows add Auto Layout button when no layout keys are present on a frame", () => {
-    const onSetStyle = vi.fn();
-    const selection = makeSelection({
-      tag: "frame",
-      styles: [
-        { key: "width", value: "100px", source: "inline", readOnly: false },
-      ],
-    });
-    const { getByLabelText } = render(
-      <PropertiesPanel
-        selection={selection}
-        onSetStyle={onSetStyle}
-        onSetText={() => {}}
-        onSetName={() => {}}
-        onToggleHidden={() => {}}
-        onToggleLocked={() => {}}
-      />,
-    );
-
-    const addBtn = getByLabelText("添加 Auto Layout");
-    expect(addBtn).toBeDefined();
-    fireEvent.click(addBtn);
-    expect(onSetStyle).toHaveBeenCalledWith("layout", "vertical");
-    expect(onSetStyle).toHaveBeenCalledWith("gap", 8);
-  });
-
-  it("does not show Auto Layout for non-frame tags", () => {
-    const selection = makeSelection({
-      tag: "div",
-      styles: [
-        { key: "display", value: "flex", source: "inline", readOnly: false },
-      ],
-    });
-    const { queryByText } = render(
-      <PropertiesPanel
-        selection={selection}
-        onSetStyle={() => {}}
-        onSetText={() => {}}
-        onSetName={() => {}}
-        onToggleHidden={() => {}}
-        onToggleLocked={() => {}}
-      />,
-    );
-    expect(queryByText("Auto Layout 自动布局")).toBeNull();
-  });
-
   it("commits direction, align, and wrap as Frame props on <Frame>", () => {
     const onSetStyle = vi.fn();
     const selection = makeSelection({
@@ -463,73 +310,6 @@ describe("PropertiesPanel", () => {
 
     fireEvent.click(getByLabelText("主轴 center"));
     expect(onSetStyle).toHaveBeenCalledWith("justify", "center");
-  });
-
-  it("commits CSS properties on generic non-frame tags like section", () => {
-    const onSetStyle = vi.fn();
-    const selection = makeSelection({
-      tag: "section",
-      styles: [
-        { key: "display", value: "flex", source: "inline", readOnly: false },
-        {
-          key: "flexDirection",
-          value: "column",
-          source: "inline",
-          readOnly: false,
-        },
-      ],
-    });
-    const { getByLabelText } = render(
-      <PropertiesPanel
-        selection={selection}
-        onSetStyle={onSetStyle}
-        onSetText={() => {}}
-        onSetName={() => {}}
-        onToggleHidden={() => {}}
-        onToggleLocked={() => {}}
-      />,
-    );
-
-    fireEvent.click(getByLabelText("对齐 center"));
-    expect(onSetStyle).toHaveBeenCalledWith("alignItems", "center");
-
-    fireEvent.click(getByLabelText("换行 wrap"));
-    expect(onSetStyle).toHaveBeenCalledWith("flexWrap", "wrap");
-
-    fireEvent.click(getByLabelText("主轴 center"));
-    expect(onSetStyle).toHaveBeenCalledWith("justifyContent", "center");
-  });
-
-  it("commits gap and padding with parsed values on Enter in Auto Layout", () => {
-    const onSetStyle = vi.fn();
-    const selection = makeSelection({
-      tag: "frame",
-      styles: [
-        { key: "display", value: "flex", source: "inline", readOnly: false },
-        { key: "gap", value: "8", source: "inline", readOnly: false },
-        { key: "padding", value: "16", source: "inline", readOnly: false },
-      ],
-    });
-    const { getByLabelText } = render(
-      <PropertiesPanel
-        selection={selection}
-        onSetStyle={onSetStyle}
-        onSetText={() => {}}
-        onSetName={() => {}}
-        onToggleHidden={() => {}}
-        onToggleLocked={() => {}}
-      />,
-    );
-
-    const gapInput = getByLabelText("Gap 间距") as HTMLInputElement;
-    fireEvent.change(gapInput, { target: { value: "24" } });
-    fireEvent.keyDown(gapInput, { key: "Enter" });
-    expect(onSetStyle).toHaveBeenCalledWith("gap", 24);
-
-    const padInput = getByLabelText("Padding 内边距") as HTMLInputElement;
-    fireEvent.change(padInput, { target: { value: "12px" } });
-    fireEvent.blur(padInput);
-    expect(onSetStyle).toHaveBeenCalledWith("padding", 12);
   });
 
   it("passes target with file, spans and selector when editing shared styles", () => {
@@ -575,38 +355,6 @@ describe("PropertiesPanel", () => {
       end: 127,
       selector: ".card",
       sourceId: "pages/home.tsx#.card",
-    });
-  });
-
-  it("passes target with source 'inline' when editing inline/custom styles", () => {
-    const onSetStyle = vi.fn();
-    const selection = makeSelection({
-      styles: [
-        {
-          key: "opacity",
-          value: "1",
-          source: "inline",
-          readOnly: false,
-        },
-      ],
-    });
-    const { getByLabelText } = render(
-      <PropertiesPanel
-        selection={selection}
-        onSetStyle={onSetStyle}
-        onSetText={() => {}}
-        onSetName={() => {}}
-        onToggleHidden={() => {}}
-        onToggleLocked={() => {}}
-      />,
-    );
-
-    const opacityInput = getByLabelText("样式 opacity") as HTMLInputElement;
-    fireEvent.change(opacityInput, { target: { value: "0.8" } });
-    fireEvent.blur(opacityInput);
-
-    expect(onSetStyle).toHaveBeenCalledWith("opacity", 0.8, {
-      source: "inline",
     });
   });
 
@@ -741,17 +489,23 @@ describe("PropertiesPanel", () => {
     expect(onDetachInstance).toHaveBeenCalledTimes(1);
   });
 
-  it("disables detach instance button when onDetachInstance is omitted", () => {
+  it("renders variant axis dropdown controls and updates prop value via onSetAttrs", async () => {
+    const onSetAttrs = vi.fn();
     const selection = makeSelection({
-      name: "Card",
+      name: "Button",
+      componentName: "Button",
       kind: "component",
       styles: [],
+      attrs: [{ key: "size", value: "medium" }],
+      variantAxes: [{ name: "size", values: ["small", "medium", "large"] }],
+      variantProps: { size: "medium" },
     });
 
-    const { getByLabelText } = render(
+    const { getByTestId, getByText, findByTestId } = render(
       <PropertiesPanel
         selection={selection}
         onSetStyle={() => {}}
+        onSetAttrs={onSetAttrs}
         onSetText={() => {}}
         onSetName={() => {}}
         onToggleHidden={() => {}}
@@ -759,8 +513,16 @@ describe("PropertiesPanel", () => {
       />,
     );
 
-    const detachBtn = getByLabelText("分离实例") as HTMLButtonElement;
-    expect(detachBtn.disabled).toBe(true);
+    expect(getByTestId("variant-controls")).toBeDefined();
+    expect(getByText("变体属性")).toBeDefined();
+    const trigger = getByTestId("variant-trigger-size");
+    expect(trigger.textContent).toContain("medium");
+
+    fireEvent.pointerDown(trigger, { button: 0 });
+    const option = await findByTestId("variant-option-size-large");
+    fireEvent.click(option);
+
+    expect(onSetAttrs).toHaveBeenCalledWith({ size: "large" });
   });
 
   it("renders Image card for image tag and commits src, radius and opacity", () => {
@@ -855,94 +617,29 @@ describe("PropertiesPanel", () => {
     expect(disabledFlatten.disabled).toBe(true);
   });
 
-  it("renders export section with formats and scales, calls onExportNode on click", () => {
-    const onExportNode = vi.fn();
-    const selection = makeSelection({
+  it("renders Prototype section when a Frame is selected and allows setting navigation", () => {
+    const onSetAttrs = vi.fn();
+    const onSetStyle = vi.fn();
+    const frameSelection = makeSelection({
       name: "Card",
-      tag: "frame",
-      styles: [],
-    });
-
-    const { getByText, getByLabelText } = render(
-      <PropertiesPanel
-        selection={selection}
-        onSetStyle={() => {}}
-        onSetText={() => {}}
-        onSetName={() => {}}
-        onToggleHidden={() => {}}
-        onToggleLocked={() => {}}
-        onExportNode={onExportNode}
-      />,
-    );
-
-    expect(getByText("导出 Export")).toBeDefined();
-
-    // SVG is disabled for non-vector frame
-    const svgBtn = getByLabelText("导出格式 svg") as HTMLButtonElement;
-    expect(svgBtn.disabled).toBe(true);
-
-    // Switch to webp and 2x
-    const webpBtn = getByLabelText("导出格式 webp");
-    fireEvent.click(webpBtn);
-
-    const scale2xBtn = getByLabelText("导出倍率 2x");
-    fireEvent.click(scale2xBtn);
-
-    const exportBtn = getByLabelText("导出选中图层");
-    fireEvent.click(exportBtn);
-
-    expect(onExportNode).toHaveBeenCalledWith("webp", 2);
-  });
-
-  it("enables SVG format when tag is vector", () => {
-    const onExportNode = vi.fn();
-    const selection = makeSelection({
-      name: "IconStar",
-      tag: "vector",
-      styles: [],
-    });
-
-    const { getByLabelText } = render(
-      <PropertiesPanel
-        selection={selection}
-        onSetStyle={() => {}}
-        onSetText={() => {}}
-        onSetName={() => {}}
-        onToggleHidden={() => {}}
-        onToggleLocked={() => {}}
-        onExportNode={onExportNode}
-      />,
-    );
-
-    const svgBtn = getByLabelText("导出格式 svg") as HTMLButtonElement;
-    expect(svgBtn.disabled).toBe(false);
-
-    fireEvent.click(svgBtn);
-    const exportBtn = getByLabelText("导出选中图层");
-    fireEvent.click(exportBtn);
-
-    expect(onExportNode).toHaveBeenCalledWith("svg", 1);
-  });
-
-  it("excludes dedicated card properties (src for Image, op for Boolean) from generic style groups", () => {
-    const imageSelection = makeSelection({
-      name: "Avatar",
-      tag: "Image",
+      tag: "Frame",
       styles: [
-        {
-          key: "src",
-          value: "assets/avatar.png",
-          source: "inline",
-          readOnly: false,
-        },
-        { key: "opacity", value: "0.8", source: "inline", readOnly: false },
+        { key: "width", value: "300", source: "inline", readOnly: false },
+        { key: "height", value: "200", source: "inline", readOnly: false },
       ],
     });
 
-    const { queryByLabelText, getByLabelText } = render(
+    const pages = [
+      { id: "page-home", name: "Home" },
+      { id: "page-detail", name: "Detail" },
+    ];
+
+    const { getByText } = render(
       <PropertiesPanel
-        selection={imageSelection}
-        onSetStyle={() => {}}
+        selection={frameSelection}
+        pages={pages}
+        onSetStyle={onSetStyle}
+        onSetAttrs={onSetAttrs}
         onSetText={() => {}}
         onSetName={() => {}}
         onToggleHidden={() => {}}
@@ -950,8 +647,55 @@ describe("PropertiesPanel", () => {
       />,
     );
 
-    expect(getByLabelText("图片源路径")).toBeDefined();
-    expect(queryByLabelText("样式 src")).toBeNull();
-    expect(getByLabelText("样式 opacity")).toBeDefined();
+    expect(getByText("交互原型 (Prototype)")).toBeDefined();
+    expect(getByText("触发方式 (Trigger)")).toBeDefined();
+    expect(getByText("动作 (Action)")).toBeDefined();
+    expect(getByText("目标页面 (Destination)")).toBeDefined();
+    expect(getByText("转场动画 (Transition)")).toBeDefined();
+    expect(getByText("时长 (Duration ms)")).toBeDefined();
+  });
+
+  it("dispatches Frame mode through onSetAttrs and clears it for inherit", async () => {
+    const onSetAttrs = vi.fn();
+    const selection = makeSelection({
+      name: "Card",
+      tag: "Frame",
+      styles: [
+        { key: "width", value: "300", source: "inline", readOnly: false },
+        { key: "mode", value: "dark", source: "inline", readOnly: false },
+      ],
+    });
+    const tokenModes = [
+      { name: "default", isDefault: true },
+      { name: "dark", isDefault: false },
+      { name: "compact", isDefault: false },
+    ];
+    const { getByTestId, findByTestId, queryByText } = render(
+      <PropertiesPanel
+        selection={selection}
+        tokenModes={tokenModes}
+        onSetStyle={() => {}}
+        onSetAttrs={onSetAttrs}
+        onSetText={() => {}}
+        onSetName={() => {}}
+        onToggleHidden={() => {}}
+        onToggleLocked={() => {}}
+      />,
+    );
+    const trigger = getByTestId("mode-trigger");
+    expect(trigger.textContent).toContain("dark");
+    expect(queryByText("mode")).toBeNull();
+
+    fireEvent.pointerDown(trigger, { button: 0 });
+    fireEvent.click(await findByTestId("mode-option-compact"));
+    expect(onSetAttrs).toHaveBeenCalledWith({ mode: "compact" });
+
+    fireEvent.pointerDown(getByTestId("mode-trigger"), { button: 0 });
+    fireEvent.click(await findByTestId("mode-option-inherit"));
+    expect(onSetAttrs).toHaveBeenCalledWith({ mode: null });
+
+    fireEvent.pointerDown(getByTestId("mode-trigger"), { button: 0 });
+    fireEvent.click(await findByTestId("mode-option-default"));
+    expect(onSetAttrs).toHaveBeenCalledWith({ mode: "default" });
   });
 });

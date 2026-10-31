@@ -75,6 +75,7 @@ export interface StylesheetRule {
   file: string;
   selector: string;
   selectorSpan: Span;
+  ruleSpan: Span;
   fullSelector: string;
   decls: StylesheetDecl[];
 }
@@ -82,6 +83,25 @@ export interface StylesheetRule {
 export interface ParsedStylesheet {
   file: string;
   rules: StylesheetRule[];
+}
+
+export interface TokenMode {
+  name: string;
+  isDefault: boolean;
+  rules: StylesheetRule[];
+}
+
+export interface TokenDefinition {
+  name: string;
+  value: string;
+  values: Record<string, string>;
+  file: string;
+  span: Span;
+}
+
+export interface TokenTable {
+  modes: TokenMode[];
+  tokens: TokenDefinition[];
 }
 
 export interface TextEdit {

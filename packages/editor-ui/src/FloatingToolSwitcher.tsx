@@ -5,7 +5,9 @@ import {
   SquareIcon,
   CircleIcon,
   StarIcon,
+  PenToolIcon,
   TypeIcon,
+  MessageSquareIcon,
   type LucideIcon,
 } from "lucide-react";
 import { Kbd } from "@/components/ui/kbd";
@@ -40,7 +42,9 @@ const tools: Array<{
   { value: "rect", label: "矩形", shortcut: "R", icon: SquareIcon },
   { value: "ellipse", label: "椭圆", shortcut: "O", icon: CircleIcon },
   { value: "star", label: "星形", shortcut: "S", icon: StarIcon },
+  { value: "pen", label: "钢笔", shortcut: "P", icon: PenToolIcon },
   { value: "text", label: "文字", shortcut: "T", icon: TypeIcon },
+  { value: "comment", label: "评论", shortcut: "C", icon: MessageSquareIcon },
 ];
 
 const VALID_TOOLS = new Set<string>(tools.map((t) => t.value));

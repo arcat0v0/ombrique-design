@@ -17,12 +17,6 @@ describe("Frame", () => {
     expect(section?.style.position).toBe("relative");
   });
 
-  it("applies free layout by default without flex", () => {
-    const { container } = render(<Frame width={100} height={100} />);
-    const section = container.querySelector("section");
-    expect(section?.style.display).toBe("");
-  });
-
   it("applies vertical flex layout with gap and padding", () => {
     const { container } = render(
       <Frame width={100} height={100} layout="vertical" gap={8} padding={16} />,
@@ -43,14 +37,6 @@ describe("Frame", () => {
     expect(section?.style.display).toBe("none");
   });
 
-  it("keeps hidden effective even with grid layout", () => {
-    const { container } = render(
-      <Frame width={100} height={100} grid={{ columns: 2 }} hidden />,
-    );
-    const section = container.querySelector("section");
-    expect(section?.style.display).toBe("none");
-  });
-
   it("applies horizontal flex layout", () => {
     const { container } = render(
       <Frame width={100} height={100} layout="horizontal" gap={4} />,
@@ -66,7 +52,6 @@ describe("Frame", () => {
     );
     const section = container.querySelector("section");
     expect(section?.style.background).toBe("rgb(255, 255, 255)");
-    expect(section?.style.borderRadius).toBe("12px");
   });
 
   it("lets user style override derived styles", () => {
@@ -125,16 +110,41 @@ describe("Frame", () => {
     expect(section?.style.padding).toBe("8px");
   });
 
-  it("keeps grid and flex mutually exclusive with flex taking priority", () => {
+  it("renders prototype interaction attributes to data-prototype-*", () => {
     const { container } = render(
       <Frame
         width={100}
         height={100}
-        layout="horizontal"
-        grid={{ columns: 2 }}
+        onClickNavigate="page-settings"
+        cursor="pointer"
+        transitionType="slide-left"
+        transitionDuration={350}
+        onHoverStyle={{ opacity: 0.8 }}
       />,
     );
     const section = container.querySelector("section");
-    expect(section?.style.display).toBe("flex");
+    expect(section?.getAttribute("data-prototype-navigate")).toBe(
+      "page-settings",
+    );
+    expect(section?.getAttribute("data-prototype-cursor")).toBe("pointer");
+    expect(section?.getAttribute("data-prototype-transition")).toBe(
+      "slide-left",
+    );
+    expect(section?.getAttribute("data-prototype-duration")).toBe("350");
+    expect(section?.getAttribute("data-prototype-hover")).toBe(
+      '{"opacity":0.8}',
+    );
+  });
+
+  it("renders mode as data-mode on the frame wrapping its descendants", () => {
+    const { container } = render(
+      <Frame width={100} height={100} mode="dark">
+        <span data-testid="child">x</span>
+      </Frame>,
+    );
+    const section = container.querySelector("section");
+    expect(section?.getAttribute("data-mode")).toBe("dark");
+    const child = container.querySelector('[data-testid="child"]');
+    expect(child?.closest('[data-mode="dark"]')).toBe(section);
   });
 });

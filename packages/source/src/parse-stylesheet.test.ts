@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseStylesheet } from "./parse-stylesheet.js";
+import { parseStylesheet, parseTokenTable } from "./parse-stylesheet.js";
 
 const SCSS = `// header comment
 .card {
@@ -15,7 +15,8 @@ const SCSS = `// header comment
 describe("parseStylesheet", () => {
   const sheet = parseStylesheet("styles/app.module.scss", SCSS);
 
-  it("expands nested selectors to full class paths", () => {
+  it("expands nested and comma-separated selectors to one rule entry per full class path", () => {
+    expect(sheet.rules).toHaveLength(6);
     const selectors = sheet.rules.map((r) => r.fullSelector);
     expect(selectors).toContain(".card");
     expect(selectors).toContain(".card .label");
@@ -23,15 +24,17 @@ describe("parseStylesheet", () => {
     expect(selectors).toContain(".card.active");
     expect(selectors).toContain(".card.focus");
     expect(selectors).toContain(".card > .child");
-  });
-
-  it("emits one rule entry per expanded selector with the same decls", () => {
-    expect(sheet.rules).toHaveLength(6);
     const active = sheet.rules.find((r) => r.fullSelector === ".card.active");
     const focus = sheet.rules.find((r) => r.fullSelector === ".card.focus");
     expect(active?.decls).toHaveLength(1);
     expect(focus?.decls).toHaveLength(1);
     expect(active?.decls[0]?.value).toBe("green");
+
+    const split = parseStylesheet(
+      "styles/x.scss",
+      `.a, .b { color: black; }\n`,
+    );
+    expect(split.rules.map((r) => r.fullSelector).sort()).toEqual([".a", ".b"]);
   });
 
   it("captures declarations with value spans matching source text", () => {
@@ -53,26 +56,28 @@ describe("parseStylesheet", () => {
     );
   });
 
-  it("keeps comments out of rules and declarations", () => {
-    for (const rule of sheet.rules) {
-      expect(rule.selector).not.toContain("comment");
-      for (const decl of rule.decls) {
-        expect(decl.prop).not.toMatch(/comment/);
-      }
-    }
-  });
-
-  it("handles top-level multiple selectors", () => {
-    const code = `.a, .b { color: black; }\n`;
-    const s = parseStylesheet("styles/x.scss", code);
-    expect(s.rules.map((r) => r.fullSelector).sort()).toEqual([".a", ".b"]);
-  });
-
   it("exposes selector spans for the nested selector as written", () => {
     const label = sheet.rules.find((r) => r.fullSelector === ".card .label");
     if (!label) throw new Error("label missing");
     expect(SCSS.slice(label.selectorSpan.start, label.selectorSpan.end)).toBe(
       ".label",
     );
+  });
+
+  it("parses modes, empty modes, and values without requiring final semicolons", () => {
+    const css =
+      ':root { --bg: white }\n[data-mode="dark"] { --bg: black }\n[data-mode="Compact"] {}';
+    const table = parseTokenTable(parseStylesheet("tokens.css", css));
+    expect(table.modes.map((mode) => mode.name)).toEqual([
+      "default",
+      "dark",
+      "Compact",
+    ]);
+    expect(table.tokens[0]?.values).toEqual({
+      default: "white",
+      dark: "black",
+    });
+    const decl = table.modes[1]?.rules[0]?.decls[0];
+    expect(css.slice(decl?.valueSpan.start, decl?.valueSpan.end)).toBe("black");
   });
 });

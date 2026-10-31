@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CoinsIcon, LayersIcon } from "lucide-react";
+import {
+  CoinsIcon,
+  ComponentIcon,
+  HistoryIcon,
+  LayersIcon,
+  MessageSquareIcon,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   ResizableHandle,
@@ -10,9 +16,12 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { DiagnosticsBar } from "./DiagnosticsBar";
 import { LayersPanel } from "./LayersPanel";
+import { AssetsPanel } from "./AssetsPanel";
 import { PagesPanel } from "./PagesPanel";
 import { PropertiesPanel } from "./PropertiesPanel";
 import { TokensPanel } from "./TokensPanel";
+import { VersionHistoryPanel } from "./VersionHistoryPanel";
+import { CommentsPanel } from "./CommentsPanel";
 import { Toolbar } from "./Toolbar";
 import type { ShellActions, ShellView } from "./types";
 import "./theme.css";
@@ -23,7 +32,9 @@ export interface ShellProps {
 
 export function Shell({ view, actions }: ShellProps) {
   const canvasMountRef = useRef<HTMLDivElement>(null);
-  const [leftTab, setLeftTab] = useState<"layers" | "tokens">("layers");
+  const [leftTab, setLeftTab] = useState<
+    "layers" | "assets" | "tokens" | "history" | "comments"
+  >("layers");
   const activeTool = view.activeTool ?? "select";
 
   const handleGroup = useCallback(() => {
@@ -80,6 +91,12 @@ export function Shell({ view, actions }: ShellProps) {
         }
         return;
       }
+      if (!mod && key === "c") {
+        event.preventDefault();
+        actions.setTool?.("comment");
+        setLeftTab("comments");
+        return;
+      }
       if (event.key === "Backspace" || event.key === "Delete") {
         event.preventDefault();
         actions.deleteSelection();
@@ -122,6 +139,10 @@ export function Shell({ view, actions }: ShellProps) {
     window.addEventListener("resize", report);
     return () => window.removeEventListener("resize", report);
   }, [actions.updateCanvasBounds]);
+
+  useEffect(() => {
+    if (view.commentsTabRequest) setLeftTab("comments");
+  }, [view.commentsTabRequest]);
   return (
     <TooltipProvider delayDuration={200}>
       <div className="shell flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
@@ -187,6 +208,10 @@ export function Shell({ view, actions }: ShellProps) {
                 onMinimizeWindow={actions.minimizeWindow}
                 onToggleWindowMaximize={actions.toggleWindowMaximize}
                 onCloseWindow={actions.closeWindow}
+                prototypeMode={view.prototypeMode}
+                showHotspots={view.showHotspots}
+                onTogglePrototypeMode={actions.togglePrototypeMode}
+                onToggleHotspots={actions.toggleHotspots}
               />
             );
           })()}
@@ -218,9 +243,14 @@ export function Shell({ view, actions }: ShellProps) {
                 onKeyDown={(e) => {
                   if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
                     e.preventDefault();
-                    setLeftTab((prev) =>
-                      prev === "layers" ? "tokens" : "layers",
-                    );
+                    const tabs: Array<
+                      "layers" | "assets" | "tokens" | "history" | "comments"
+                    > = ["layers", "assets", "tokens", "history", "comments"];
+                    const curIdx = tabs.indexOf(leftTab);
+                    const delta = e.key === "ArrowRight" ? 1 : -1;
+                    const nextIdx =
+                      (curIdx + delta + tabs.length) % tabs.length;
+                    setLeftTab(tabs[nextIdx] ?? "layers");
                   }
                 }}
               >
@@ -245,6 +275,24 @@ export function Shell({ view, actions }: ShellProps) {
                 <Button
                   type="button"
                   role="tab"
+                  aria-selected={leftTab === "assets"}
+                  variant={leftTab === "assets" ? "secondary" : "ghost"}
+                  size="xs"
+                  onClick={() => setLeftTab("assets")}
+                  className="h-6 gap-1 px-2 text-[11px] font-normal"
+                  aria-label="查看组件资产"
+                >
+                  <ComponentIcon className="size-3 text-muted-foreground" />
+                  <span>资产</span>
+                  {view.components && view.components.length > 0 && (
+                    <span className="text-[10px] text-muted-foreground/70 font-mono">
+                      {view.components.length}
+                    </span>
+                  )}
+                </Button>
+                <Button
+                  type="button"
+                  role="tab"
                   aria-selected={leftTab === "tokens"}
                   variant={leftTab === "tokens" ? "secondary" : "ghost"}
                   size="xs"
@@ -257,6 +305,42 @@ export function Shell({ view, actions }: ShellProps) {
                   {view.tokens && view.tokens.length > 0 && (
                     <span className="text-[10px] text-muted-foreground/70 font-mono">
                       {view.tokens.length}
+                    </span>
+                  )}
+                </Button>
+                <Button
+                  type="button"
+                  role="tab"
+                  aria-selected={leftTab === "history"}
+                  variant={leftTab === "history" ? "secondary" : "ghost"}
+                  size="xs"
+                  onClick={() => setLeftTab("history")}
+                  className="h-6 gap-1 px-2 text-[11px] font-normal"
+                  aria-label="查看版本历史"
+                >
+                  <HistoryIcon className="size-3 text-muted-foreground" />
+                  <span>历史</span>
+                  {view.history && view.history.length > 0 && (
+                    <span className="text-[10px] text-muted-foreground/70 font-mono">
+                      {view.history.length}
+                    </span>
+                  )}
+                </Button>
+                <Button
+                  type="button"
+                  role="tab"
+                  aria-selected={leftTab === "comments"}
+                  variant={leftTab === "comments" ? "secondary" : "ghost"}
+                  size="xs"
+                  onClick={() => setLeftTab("comments")}
+                  className="h-6 gap-1 px-2 text-[11px] font-normal"
+                  aria-label="查看评论讨论"
+                >
+                  <MessageSquareIcon className="size-3 text-muted-foreground" />
+                  <span>评论</span>
+                  {view.comments && view.comments.length > 0 && (
+                    <span className="text-[10px] text-muted-foreground/70 font-mono">
+                      {view.comments.filter((c) => !c.resolved).length}
                     </span>
                   )}
                 </Button>
@@ -274,13 +358,53 @@ export function Shell({ view, actions }: ShellProps) {
                   onToggleHiddenForLayer={actions.toggleHiddenForLayer}
                   onToggleLockedForLayer={actions.toggleLockedForLayer}
                   onDeleteSelection={actions.deleteSelection}
+                  onReparentLayer={actions.reparentLayer}
+                  onReorderLayer={actions.reorderLayer}
                 />
-              ) : (
+              ) : leftTab === "assets" ? (
+                <AssetsPanel
+                  components={view.components}
+                  onInsertComponent={(name) =>
+                    actions.createComponentInstance?.(name)
+                  }
+                />
+              ) : leftTab === "tokens" ? (
                 <TokensPanel
                   tokens={view.tokens}
+                  modes={view.tokenModes}
+                  onAddMode={actions.addTokenMode}
+                  onRenameMode={actions.renameTokenMode}
+                  onDeleteMode={actions.deleteTokenMode}
                   onRefreshToken={actions.refreshTokens}
                   onSetToken={actions.setToken}
                   onCreateToken={actions.createToken}
+                />
+              ) : leftTab === "history" ? (
+                <VersionHistoryPanel
+                  gitStatus={view.gitStatus}
+                  history={view.history}
+                  branches={view.branches}
+                  isHistoryPreview={view.isHistoryPreview}
+                  previewCommit={view.previewCommit}
+                  onSaveVersion={actions.saveVersion}
+                  onRefreshHistory={actions.refreshHistory}
+                  onPreviewVersion={actions.previewVersion}
+                  onExitHistoryPreview={actions.exitHistoryPreview}
+                  onRestoreVersion={actions.restoreVersion}
+                  onCreateBranch={actions.createBranch}
+                  onSwitchBranch={actions.switchBranch}
+                />
+              ) : (
+                <CommentsPanel
+                  comments={view.comments}
+                  activeCommentThreadId={view.activeCommentThreadId}
+                  onSelectCommentThread={actions.selectCommentThread}
+                  onCreateCommentThread={actions.createCommentThread}
+                  onReplyCommentThread={actions.replyCommentThread}
+                  onResolveCommentThread={actions.resolveCommentThread}
+                  onUnresolveCommentThread={actions.unresolveCommentThread}
+                  onDeleteCommentThread={actions.deleteCommentThread}
+                  onDeleteCommentMessage={actions.deleteCommentMessage}
                 />
               )}
             </ResizablePanel>
@@ -296,7 +420,58 @@ export function Shell({ view, actions }: ShellProps) {
                   activeTool === "hand" ? "cursor-grab" : "cursor-default",
                 )}
                 data-testid="canvas-slot"
+                onDragOver={(e) => {
+                  if (
+                    e.dataTransfer.types.includes(
+                      "application/ombrique-component",
+                    ) ||
+                    e.dataTransfer.types.includes("text/plain")
+                  ) {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "copy";
+                  }
+                }}
+                onDrop={(e) => {
+                  const compName =
+                    e.dataTransfer.getData("application/ombrique-component") ||
+                    e.dataTransfer.getData("text/plain");
+                  if (!compName) return;
+                  e.preventDefault();
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const zoom = view.zoom || 1;
+                  const x = Math.round((e.clientX - rect.left) / zoom);
+                  const y = Math.round((e.clientY - rect.top) / zoom);
+                  actions.createComponentInstance?.(compName, { x, y });
+                }}
               >
+                {view.isHistoryPreview && (
+                  <div className="absolute top-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 rounded-full bg-card/95 border border-primary/40 px-4 py-1.5 shadow-lg backdrop-blur text-xs">
+                    <span className="text-primary font-medium flex items-center gap-1.5">
+                      <span className="size-2 rounded-full bg-primary animate-pulse" />
+                      正在预览历史版本: {view.previewCommit?.shortHash} (
+                      {view.previewCommit?.message})
+                    </span>
+                    <Button
+                      variant="default"
+                      size="xs"
+                      className="h-6 text-[11px]"
+                      onClick={() =>
+                        view.previewCommit &&
+                        actions.restoreVersion?.(view.previewCommit)
+                      }
+                    >
+                      恢复此版本
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="xs"
+                      className="h-6 text-[11px]"
+                      onClick={() => actions.exitHistoryPreview?.()}
+                    >
+                      退出预览
+                    </Button>
+                  </div>
+                )}
                 <div
                   ref={canvasMountRef}
                   id="canvas-mount"
@@ -316,7 +491,11 @@ export function Shell({ view, actions }: ShellProps) {
               <PropertiesPanel
                 selection={view.selection}
                 tokens={view.tokens}
+                tokenModes={view.tokenModes}
+                pages={view.pages}
+                activePageId={view.activePageId}
                 onSetStyle={actions.setStyle}
+                onSetAttrs={actions.setAttrs}
                 onSetText={actions.setText}
                 onSetName={actions.setName}
                 onToggleHidden={actions.toggleHidden}

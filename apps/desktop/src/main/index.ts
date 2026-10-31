@@ -16,12 +16,30 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
-  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, normalize, resolve, sep } from "node:path";
 import { mimeFor, urlToProjectPath } from "@ombrique/compiler";
-import { createBundle, extractBundle } from "@ombrique/doc-service";
+import {
+  createBranch,
+  createBundle,
+  extractBundle,
+  getGitStatus,
+  listBranches,
+  listHistory,
+  loadComments,
+  readPastVersionFiles,
+  saveComments,
+  saveVersion,
+  switchBranch,
+} from "@ombrique/doc-service";
+import {
+  type ExportNodeRequest,
+  exportNodeRequestSchema,
+  commentsDocSchema,
+  planExportFiles,
+} from "@ombrique/protocol";
+import { executeExportPlan, resolveExportScale } from "./export-writer";
 
 const here = __dirname;
 const rendererDir = join(here, "../renderer");
@@ -55,6 +73,8 @@ let projectRoot: string | null = null;
 let shellWindow: BrowserWindow | null = null;
 let canvasView: WebContentsView | null = null;
 let projectFiles: Record<string, string> = {};
+let previewActive = false;
+let workingTreeFiles: Record<string, string> = {};
 
 const pending = new Map<string, (payload: Record<string, unknown>) => void>();
 let requestSeq = 0;
@@ -231,6 +251,7 @@ function wireDocHost(host: DocHost) {
     if (type === "files") {
       projectFiles = (message.files as Record<string, string>) ?? projectFiles;
       shellWindow?.webContents.send("ombrique:files", message);
+      canvasView?.webContents.send("ombrique:files", message);
       if (message.manifest) {
         canvasView?.webContents.send("ombrique:manifest", message.manifest);
       }
@@ -447,6 +468,11 @@ ipcMain.handle("ombrique:listTokens", async () => {
   return result.tokens ?? [];
 });
 
+ipcMain.handle("ombrique:listTokenModes", async () => {
+  const result = await request({ type: "tokens", root: projectRoot });
+  return result.modes ?? [];
+});
+
 ipcMain.handle("ombrique:importImage", async () => {
   if (!projectRoot) return { ok: false };
   const win = shellWindow ?? BrowserWindow.getFocusedWindow();
@@ -540,7 +566,9 @@ ipcMain.on(
         tool === "rect" ||
         tool === "ellipse" ||
         tool === "star" ||
-        tool === "text"
+        tool === "pen" ||
+        tool === "text" ||
+        tool === "comment"
       ) {
         shellWindow?.webContents.send("ombrique:fromShellTool", tool);
       }
@@ -577,144 +605,312 @@ interface E2eStyles {
   }>;
 }
 
-async function exportNode(payload: {
+async function requestCanvasExport(params: {
   file: string;
   path?: number[];
-  format: "png" | "jpg" | "webp" | "svg" | "pdf";
+  format: "png" | "jpg" | "webp" | "svg";
   scale: number;
-  defaultName: string;
-}): Promise<{ ok: boolean }> {
-  const win = shellWindow;
-  if (!win || !canvasView) return { ok: false };
-  let filePath: string | null = null;
-  const ext = payload.format;
-  if (process.env.OMBRIQUE_E2E) {
-    filePath = join(
-      process.env.OMBRIQUE_E2E_DIR ?? "/tmp/ombrique-e2e",
-      payload.defaultName,
-    );
-  } else {
-    const picked = await dialog.showSaveDialog(win, {
-      title: `导出 ${ext.toUpperCase()}`,
-      defaultPath: payload.defaultName,
-      filters: [{ name: `${ext.toUpperCase()} 文件`, extensions: [ext] }],
-    });
-    if (picked.canceled || !picked.filePath) return { ok: false };
-    filePath = picked.filePath;
-  }
-
-  if (payload.format === "pdf") {
-    try {
-      const pdfBytes = await canvasView.webContents.printToPDF({});
-      writeFileSync(filePath, pdfBytes);
-      return { ok: true };
-    } catch {
-      return { ok: false };
-    }
-  }
-
-  const { promise: result, resolve: resResolve } = Promise.withResolvers<{
+}): Promise<{
+  ok: boolean;
+  bytes?: Uint8Array;
+  svg?: string;
+  width?: number;
+  height?: number;
+}> {
+  if (!canvasView) return { ok: false };
+  const requestId = `exp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const { promise, resolve } = Promise.withResolvers<{
     ok: boolean;
+    bytes?: Uint8Array;
+    svg?: string;
+    width?: number;
+    height?: number;
   }>();
+
   const timer = setTimeout(() => {
-    ipcMain.removeListener("ombrique:fromCanvas", onExportResult);
-    resResolve({ ok: false });
+    ipcMain.removeListener("ombrique:fromCanvas", onResult);
+    resolve({ ok: false });
   }, 30_000);
-  const onExportResult = (
+
+  const onResult = (
     _evt: Electron.IpcMainEvent,
     msg: { channel: string; payload: unknown },
   ) => {
     if (msg.channel !== "ombrique:exportResult") return;
-    clearTimeout(timer);
-    ipcMain.removeListener("ombrique:fromCanvas", onExportResult);
     const res = msg.payload as {
-      outPath: string;
+      requestId?: string;
       ok: boolean;
-      bytes?: ArrayBuffer;
-    };
-    if (!res.ok || !res.bytes) {
-      resResolve({ ok: false });
+      bytes?: ArrayBuffer | Uint8Array;
+      svg?: string;
+      width?: number;
+      height?: number;
+    } | null;
+    if (!res) return;
+    if (res.requestId && res.requestId !== requestId) return;
+
+    clearTimeout(timer);
+    ipcMain.removeListener("ombrique:fromCanvas", onResult);
+    if (!res.ok) {
+      resolve({ ok: false });
       return;
     }
-    writeFileSync(res.outPath, Buffer.from(res.bytes));
-    resResolve({ ok: true });
+    const bytes = res.bytes
+      ? res.bytes instanceof Uint8Array
+        ? res.bytes
+        : new Uint8Array(res.bytes)
+      : undefined;
+    resolve({
+      ok: true,
+      bytes,
+      svg: res.svg,
+      width: res.width,
+      height: res.height,
+    });
   };
-  ipcMain.on("ombrique:fromCanvas", onExportResult);
+
+  ipcMain.on("ombrique:fromCanvas", onResult);
   canvasView.webContents.send("ombrique:export", {
-    file: payload.file,
-    path: payload.path,
-    format: payload.format,
-    scale: payload.scale,
-    outPath: filePath,
+    requestId,
+    file: params.file,
+    path: params.path,
+    format: params.format,
+    scale: params.scale,
   });
-  return result;
+
+  return promise;
+}
+
+async function renderSvgToPdf(
+  svgString: string,
+  fallbackWidth = 400,
+  fallbackHeight = 300,
+): Promise<Buffer> {
+  let width = fallbackWidth;
+  let height = fallbackHeight;
+  const vbMatch = svgString.match(
+    /viewBox=["']\s*([0-9.-]+)\s+([0-9.-]+)\s+([0-9.-]+)\s+([0-9.-]+)\s*["']/i,
+  );
+  if (vbMatch?.[3] && vbMatch[4]) {
+    width = Math.max(10, Math.round(Number.parseFloat(vbMatch[3])));
+    height = Math.max(10, Math.round(Number.parseFloat(vbMatch[4])));
+  } else {
+    const wMatch = svgString.match(/width=["']([0-9.]+)["']/i);
+    const hMatch = svgString.match(/height=["']([0-9.]+)["']/i);
+    if (wMatch?.[1]) {
+      width = Math.max(10, Math.round(Number.parseFloat(wMatch[1])));
+    }
+    if (hMatch?.[1]) {
+      height = Math.max(10, Math.round(Number.parseFloat(hMatch[1])));
+    }
+  }
+
+  const printWin = new BrowserWindow({
+    show: false,
+    width,
+    height,
+    webPreferences: {
+      offscreen: true,
+    },
+  });
+
+  try {
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @page { margin: 0; size: ${width}px ${height}px; }
+  html, body { margin: 0; padding: 0; width: ${width}px; height: ${height}px; overflow: hidden; background: transparent; }
+  svg { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+${svgString}
+</body>
+</html>`;
+    await printWin.loadURL(
+      `data:text/html;charset=utf-8,${encodeURIComponent(html)}`,
+    );
+    const pdf = await printWin.webContents.printToPDF({
+      printBackground: true,
+      margins: { top: 0, bottom: 0, left: 0, right: 0 },
+      preferCSSPageSize: true,
+    });
+    return pdf;
+  } finally {
+    printWin.destroy();
+  }
+}
+
+async function exportNode(
+  rawPayload: unknown,
+): Promise<{ ok: boolean; written?: string[] }> {
+  const win = shellWindow;
+  if (!win || !canvasView) return { ok: false };
+
+  let req: ExportNodeRequest;
+  const parsed = exportNodeRequestSchema.safeParse(rawPayload);
+  if (parsed.success) {
+    req = parsed.data;
+  } else {
+    const legacy = rawPayload as {
+      file?: string;
+      path?: number[];
+      format?: "png" | "jpg" | "webp" | "svg" | "pdf";
+      scale?: number;
+      defaultName?: string;
+    } | null;
+    if (legacy?.file && legacy.format) {
+      req = {
+        file: legacy.file,
+        path: legacy.path,
+        name: (legacy.defaultName || "export").replace(/\.[^.]+$/, ""),
+        settings: [
+          {
+            id: "legacy",
+            format: legacy.format,
+            scale: { type: "scale", value: legacy.scale ?? 2 },
+            suffix: "",
+          },
+        ],
+      };
+    } else {
+      return { ok: false };
+    }
+  }
+
+  const planned = planExportFiles(req.name, req.settings);
+  if (planned.length === 0) return { ok: false };
+
+  let dest:
+    | { mode: "single"; filePath: string }
+    | { mode: "directory"; dirPath: string };
+
+  const isE2E = Boolean(process.env.OMBRIQUE_E2E);
+  const e2eDir = process.env.OMBRIQUE_E2E_DIR ?? "/tmp/ombrique-e2e";
+
+  if (planned.length === 1 && planned[0]) {
+    const defaultFilename = planned[0].filename;
+    if (isE2E) {
+      dest = {
+        mode: "single",
+        filePath: join(e2eDir, defaultFilename),
+      };
+    } else {
+      const ext = planned[0].setting.format;
+      const picked = await dialog.showSaveDialog(win, {
+        title: `导出 ${ext.toUpperCase()}`,
+        defaultPath: defaultFilename,
+        filters: [{ name: `${ext.toUpperCase()} 文件`, extensions: [ext] }],
+      });
+      if (picked.canceled || !picked.filePath) return { ok: false };
+      dest = {
+        mode: "single",
+        filePath: picked.filePath,
+      };
+    }
+  } else {
+    if (isE2E) {
+      dest = {
+        mode: "directory",
+        dirPath: e2eDir,
+      };
+    } else {
+      const picked = await dialog.showOpenDialog(win, {
+        title: "选择导出目录",
+        properties: ["openDirectory", "createDirectory"],
+      });
+      if (
+        picked.canceled ||
+        picked.filePaths.length === 0 ||
+        !picked.filePaths[0]
+      ) {
+        return { ok: false };
+      }
+      dest = {
+        mode: "directory",
+        dirPath: picked.filePaths[0],
+      };
+    }
+  }
+
+  try {
+    const written = await executeExportPlan({
+      baseName: req.name,
+      settings: req.settings,
+      dest,
+      renderItem: async (setting) => {
+        if (setting.format === "pdf") {
+          const svgRes = await requestCanvasExport({
+            file: req.file,
+            path: req.path,
+            format: "svg",
+            scale: 1,
+          });
+          if (!svgRes.ok || (!svgRes.svg && !svgRes.bytes)) {
+            throw new Error("Failed to render SVG for PDF export");
+          }
+          const svgString =
+            svgRes.svg || new TextDecoder().decode(svgRes.bytes);
+          try {
+            const pdfBuffer = await renderSvgToPdf(
+              svgString,
+              svgRes.width,
+              svgRes.height,
+            );
+            return { bytes: new Uint8Array(pdfBuffer) };
+          } catch {
+            if (canvasView) {
+              const directPdf = await canvasView.webContents.printToPDF({});
+              return { bytes: new Uint8Array(directPdf) };
+            }
+            throw new Error("canvasView unavailable for PDF fallback");
+          }
+        }
+
+        const scale = resolveExportScale(setting.scale, 100);
+        const res = await requestCanvasExport({
+          file: req.file,
+          path: req.path,
+          format: setting.format,
+          scale,
+        });
+        if (!res.ok) {
+          throw new Error(`Failed to render export for ${setting.format}`);
+        }
+        return {
+          bytes: res.bytes,
+          svg: res.svg,
+        };
+      },
+    });
+
+    return { ok: true, written };
+  } catch {
+    return { ok: false };
+  }
 }
 
 async function exportPage(payload: {
   file: string;
   defaultName: string;
 }): Promise<{ ok: boolean }> {
-  const win = shellWindow;
-  if (!win || !canvasView) return { ok: false };
-  let filePath: string | null = null;
-  if (process.env.OMBRIQUE_E2E) {
-    filePath = join(
-      process.env.OMBRIQUE_E2E_DIR ?? "/tmp/ombrique-e2e",
-      payload.defaultName,
-    );
-  } else {
-    const picked = await dialog.showSaveDialog(win, {
-      title: "导出 PNG",
-      defaultPath: payload.defaultName,
-      filters: [{ name: "PNG 图片", extensions: ["png"] }],
-    });
-    if (picked.canceled || !picked.filePath) return { ok: false };
-    filePath = picked.filePath;
-  }
-  const { promise: result, resolve } = Promise.withResolvers<{ ok: boolean }>();
-  const timer = setTimeout(() => {
-    ipcMain.removeListener("ombrique:fromCanvas", onExportResult);
-    resolve({ ok: false });
-  }, 30_000);
-  const onExportResult = (
-    _evt: Electron.IpcMainEvent,
-    msg: { channel: string; payload: unknown },
-  ) => {
-    if (msg.channel !== "ombrique:exportResult") return;
-    clearTimeout(timer);
-    ipcMain.removeListener("ombrique:fromCanvas", onExportResult);
-    const res = msg.payload as {
-      outPath: string;
-      ok: boolean;
-      bytes?: ArrayBuffer;
-    };
-    if (!res.ok || !res.bytes) {
-      resolve({ ok: false });
-      return;
-    }
-    writeFileSync(res.outPath, Buffer.from(res.bytes));
-    resolve({ ok: true });
-  };
-  ipcMain.on("ombrique:fromCanvas", onExportResult);
-  canvasView.webContents.send("ombrique:export", {
+  return exportNode({
     file: payload.file,
-    outPath: filePath,
+    name: payload.defaultName.replace(/\.[^.]+$/, ""),
+    settings: [
+      {
+        id: "page-png",
+        format: "png",
+        scale: { type: "scale", value: 2 },
+        suffix: "",
+      },
+    ],
   });
-  return result;
 }
 
-ipcMain.handle(
-  "ombrique:exportNode",
-  (
-    _event,
-    payload: {
-      file: string;
-      path?: number[];
-      format: "png" | "jpg" | "webp" | "svg" | "pdf";
-      scale: number;
-      defaultName: string;
-    },
-  ) => exportNode(payload),
+ipcMain.handle("ombrique:exportNode", (_event, payload: unknown) =>
+  exportNode(payload),
 );
 
 ipcMain.handle("ombrique:bundleProject", async () => {
@@ -786,6 +982,93 @@ ipcMain.handle("ombrique:reloadCanvas", async () => {
   await canvasView?.webContents.reload();
   return true;
 });
+ipcMain.handle("ombrique:gitStatus", async () => {
+  if (!projectRoot)
+    return {
+      isRepo: false,
+      currentBranch: null,
+      dirty: false,
+      changedFiles: [],
+    };
+  return getGitStatus(projectRoot);
+});
+
+ipcMain.handle("ombrique:gitHistory", async () => {
+  if (!projectRoot) return [];
+  return listHistory(projectRoot);
+});
+
+ipcMain.handle("ombrique:gitBranches", async () => {
+  if (!projectRoot) return { current: null, branches: [] };
+  return listBranches(projectRoot);
+});
+
+ipcMain.handle(
+  "ombrique:gitCreateBranch",
+  async (_event, branchName: string) => {
+    if (!projectRoot) throw new Error("No project open");
+    await createBranch(projectRoot, branchName);
+    return true;
+  },
+);
+
+ipcMain.handle(
+  "ombrique:gitSwitchBranch",
+  async (_event, branchName: string) => {
+    if (!projectRoot) throw new Error("No project open");
+    await switchBranch(projectRoot, branchName);
+    shellWindow?.webContents.send("ombrique:branchChanged", branchName);
+    return true;
+  },
+);
+
+ipcMain.handle("ombrique:gitSaveVersion", async (_event, message: string) => {
+  if (!projectRoot) throw new Error("No project open");
+  return saveVersion(projectRoot, message);
+});
+
+ipcMain.handle("ombrique:gitPreviewVersion", async (_event, rev: string) => {
+  if (!projectRoot) throw new Error("No project open");
+  if (!previewActive) {
+    workingTreeFiles = { ...projectFiles };
+    previewActive = true;
+  }
+  const pastFiles = await readPastVersionFiles(projectRoot, rev);
+  Object.assign(projectFiles, pastFiles);
+  canvasView?.webContents.send("ombrique:files", pastFiles);
+  return true;
+});
+
+ipcMain.handle("ombrique:gitExitPreview", async () => {
+  if (!previewActive || !projectRoot) return true;
+  previewActive = false;
+  Object.assign(projectFiles, workingTreeFiles);
+  canvasView?.webContents.send("ombrique:files", workingTreeFiles);
+  return true;
+});
+
+ipcMain.handle("ombrique:gitRestoreVersion", async (_event, rev: string) => {
+  if (!projectRoot) throw new Error("No project open");
+  const pastFiles = await readPastVersionFiles(projectRoot, rev);
+  previewActive = false;
+  await docHost?.send({
+    type: "shell",
+    message: { kind: "restoreVersion", files: pastFiles },
+  });
+  return true;
+});
+
+ipcMain.handle("ombrique:loadComments", async () => {
+  if (!projectRoot) return { version: 1, threads: [] };
+  return loadComments(projectRoot);
+});
+
+ipcMain.handle("ombrique:saveComments", async (_event, doc: unknown) => {
+  if (!projectRoot) return false;
+  const parsed = commentsDocSchema.parse(doc);
+  saveComments(projectRoot, parsed);
+  return true;
+});
 
 app.whenReady().then(() => {
   console.log("[ombrique] ready");
@@ -796,7 +1079,6 @@ app.whenReady().then(() => {
     if (BrowserWindow.getAllWindows().length === 0) createShellWindow();
   });
 });
-
 if (process.env.OMBRIQUE_E2E) {
   const e2eDir = process.env.OMBRIQUE_E2E_DIR ?? "/tmp/ombrique-e2e";
   const wait = (ms: number) =>

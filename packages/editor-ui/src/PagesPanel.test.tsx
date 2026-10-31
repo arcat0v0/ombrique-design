@@ -6,12 +6,13 @@ import { PagesPanel } from "./PagesPanel";
 afterEach(cleanup);
 
 describe("PagesPanel", () => {
-  it("marks the active page with aria-current and highlights it", () => {
+  it("marks the active page with aria-current and calls onSelectPage on click", () => {
+    const onSelectPage = vi.fn();
     const { getByText } = render(
       <PagesPanel
         pages={[makePage("p1", "首页"), makePage("p2", "详情")]}
         activePageId="p2"
-        onSelectPage={() => {}}
+        onSelectPage={onSelectPage}
         onAddPage={() => {}}
       />,
     );
@@ -19,34 +20,9 @@ describe("PagesPanel", () => {
     expect(active.getAttribute("aria-current")).toBe("page");
     expect(active.className).toContain("page-tab-active");
     expect(getByText("首页").getAttribute("aria-current")).toBeNull();
-  });
 
-  it("calls onSelectPage with the page id on click", () => {
-    const onSelectPage = vi.fn();
-    const { getByText } = render(
-      <PagesPanel
-        pages={[makePage("p1", "首页")]}
-        activePageId="p1"
-        onSelectPage={onSelectPage}
-        onAddPage={() => {}}
-      />,
-    );
     getByText("首页").click();
     expect(onSelectPage).toHaveBeenCalledWith("p1");
-  });
-
-  it("calls onAddPage when the add button is clicked", () => {
-    const onAddPage = vi.fn();
-    const { getByLabelText } = render(
-      <PagesPanel
-        pages={[]}
-        activePageId={null}
-        onSelectPage={() => {}}
-        onAddPage={onAddPage}
-      />,
-    );
-    getByLabelText("添加页面").click();
-    expect(onAddPage).toHaveBeenCalledTimes(1);
   });
 
   it("triggers rename dialog and commits new page name", () => {

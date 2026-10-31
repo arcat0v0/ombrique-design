@@ -35,6 +35,14 @@ const JUSTIFY_TO_CSS: Record<FrameJustify, CSSProperties["justifyContent"]> = {
   "space-around": "space-around",
 };
 
+export type PrototypeTransitionType =
+  | "instant"
+  | "dissolve"
+  | "slide-left"
+  | "slide-right"
+  | "slide-up"
+  | "slide-down";
+
 export interface FrameProps extends HTMLAttributes<HTMLElement> {
   name?: string;
   x?: number;
@@ -50,6 +58,16 @@ export interface FrameProps extends HTMLAttributes<HTMLElement> {
   padding?: number;
   grid?: FrameGrid;
   radius?: number;
+  radiusTopLeft?: number;
+  radiusTopRight?: number;
+  radiusBottomRight?: number;
+  radiusBottomLeft?: number;
+  onClickNavigate?: string;
+  onHoverStyle?: CSSProperties;
+  cursor?: "pointer" | "default";
+  transitionType?: PrototypeTransitionType;
+  transitionDuration?: number;
+  mode?: string;
 }
 
 export function Frame({
@@ -66,9 +84,19 @@ export function Frame({
   padding,
   grid,
   radius,
+  radiusTopLeft,
+  radiusTopRight,
+  radiusBottomRight,
+  radiusBottomLeft,
   name,
   className,
   style,
+  onClickNavigate,
+  onHoverStyle,
+  cursor,
+  transitionType,
+  transitionDuration,
+  mode,
   children,
   ...rest
 }: FrameProps) {
@@ -100,11 +128,34 @@ export function Frame({
   }
   if (fill !== undefined) base.background = fill;
   if (radius !== undefined) base.borderRadius = radius;
+  if (radiusTopLeft !== undefined) base.borderTopLeftRadius = radiusTopLeft;
+  if (radiusTopRight !== undefined) base.borderTopRightRadius = radiusTopRight;
+  if (radiusBottomRight !== undefined)
+    base.borderBottomRightRadius = radiusBottomRight;
+  if (radiusBottomLeft !== undefined)
+    base.borderBottomLeftRadius = radiusBottomLeft;
   if (rest.hidden) base.display = "none";
+
+  let protoHover: string | undefined;
+  if (typeof onHoverStyle === "string") {
+    protoHover = onHoverStyle;
+  } else if (onHoverStyle && typeof onHoverStyle === "object") {
+    try {
+      protoHover = JSON.stringify(onHoverStyle);
+    } catch {}
+  }
   return (
     <section
       {...rest}
       {...dataNameAttr(name, rest)}
+      data-prototype-navigate={onClickNavigate || undefined}
+      data-prototype-cursor={cursor || undefined}
+      data-prototype-transition={transitionType || undefined}
+      data-prototype-duration={
+        transitionDuration !== undefined ? transitionDuration : undefined
+      }
+      data-prototype-hover={protoHover || undefined}
+      data-mode={mode || undefined}
       className={joinClass(className)}
       style={{ ...base, ...style }}
     >

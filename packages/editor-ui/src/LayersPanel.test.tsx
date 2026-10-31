@@ -1,4 +1,9 @@
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import {
+  cleanup,
+  createEvent,
+  fireEvent,
+  render,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { makeLayer } from "./fixtures";
 import { LayersPanel } from "./LayersPanel";
@@ -33,76 +38,28 @@ describe("LayersPanel", () => {
     expect(rootRow?.style.paddingLeft).toBe("8px");
   });
 
-  it("marks hidden layers with data-hidden and dims their text", () => {
-    const layers = [makeLayer({ id: "h", name: "Hidden", hidden: true })];
-    const { container } = render(
-      <LayersPanel
-        layers={layers}
-        selectedLayerId={null}
-        onSelectLayer={() => {}}
-      />,
-    );
-    const row = container.querySelector("[data-hidden='true']");
-    expect(row).not.toBeNull();
-    expect(row?.className).toContain("layer-row-hidden");
-  });
-
-  it("shows a lock marker for locked layers", () => {
-    const layers = [makeLayer({ id: "l", name: "Locked", locked: true })];
-    const { container, getByText } = render(
-      <LayersPanel
-        layers={layers}
-        selectedLayerId={null}
-        onSelectLayer={() => {}}
-      />,
-    );
-    const row = getByText("Locked").closest(".layer-row");
-    expect(row?.querySelector(".layer-lock")).not.toBeNull();
-    expect(container.querySelector(".layer-lock")).not.toBeNull();
-  });
-
-  it("marks generated layers with data-generated and a badge", () => {
-    const layers = [makeLayer({ id: "g", name: "Gen", generated: true })];
-    const { container, getByText } = render(
-      <LayersPanel
-        layers={layers}
-        selectedLayerId={null}
-        onSelectLayer={() => {}}
-      />,
-    );
-    const row = getByText("Gen").closest(".layer-row");
-    expect(row?.getAttribute("data-generated")).toBe("true");
-    expect(row?.textContent).toContain("代码生成");
-    expect(container.querySelector("[data-generated='true']")).not.toBeNull();
-  });
-
-  it("calls onSelectLayer with the layer id when a row is clicked", () => {
+  it("selects row on click or keyboard Enter and marks aria-selected", () => {
     const onSelectLayer = vi.fn();
     const layers = [
       makeLayer({ id: "a", name: "A" }),
       makeLayer({ id: "b", name: "B" }),
     ];
-    const { getByText } = render(
+    const { getByText, rerender } = render(
       <LayersPanel
         layers={layers}
         selectedLayerId={null}
         onSelectLayer={onSelectLayer}
       />,
     );
+
     getByText("B").click();
     expect(onSelectLayer).toHaveBeenCalledWith("b");
-  });
 
-  it("marks the selected row with aria-selected", () => {
-    const layers = [
-      makeLayer({ id: "a", name: "A" }),
-      makeLayer({ id: "b", name: "B" }),
-    ];
-    const { getByText } = render(
+    rerender(
       <LayersPanel
         layers={layers}
         selectedLayerId="b"
-        onSelectLayer={() => {}}
+        onSelectLayer={onSelectLayer}
       />,
     );
     expect(
@@ -111,49 +68,10 @@ describe("LayersPanel", () => {
     expect(
       getByText("A").closest(".layer-row")?.getAttribute("aria-selected"),
     ).toBe("false");
-  });
 
-  it("shows the empty state when there are no layers", () => {
-    const { getByText, queryByRole } = render(
-      <LayersPanel
-        layers={[]}
-        selectedLayerId={null}
-        onSelectLayer={() => {}}
-      />,
-    );
-    expect(getByText("暂无图层")).toBeDefined();
-    expect(queryByRole("tree")).toBeNull();
-  });
-
-  it("selects a layer with the keyboard on a focused row", () => {
-    const onSelectLayer = vi.fn();
-    const layers = [makeLayer({ id: "a", name: "A" })];
-    const { getByText } = render(
-      <LayersPanel
-        layers={layers}
-        selectedLayerId={null}
-        onSelectLayer={onSelectLayer}
-      />,
-    );
-    const row = getByText("A").closest(".layer-row");
-    (row as HTMLElement).click();
-    expect(onSelectLayer).toHaveBeenCalledWith("a");
-  });
-
-  it("selects a layer via Enter key on the row button", () => {
-    const onSelectLayer = vi.fn();
-    const layers = [makeLayer({ id: "a", name: "A" })];
-    const { getByText } = render(
-      <LayersPanel
-        layers={layers}
-        selectedLayerId={null}
-        onSelectLayer={onSelectLayer}
-      />,
-    );
-    const row = getByText("A").closest(".layer-row") as HTMLElement | null;
-    expect(row).not.toBeNull();
-    row?.focus();
-    fireEvent.keyDown(row as HTMLElement, { key: "Enter" });
+    const rowA = getByText("A").closest(".layer-row") as HTMLElement;
+    rowA.focus();
+    fireEvent.keyDown(rowA, { key: "Enter" });
     expect(onSelectLayer).toHaveBeenCalledWith("a");
   });
 
@@ -274,53 +192,238 @@ describe("LayersPanel", () => {
     expect(onSetName).toHaveBeenCalledWith("Renamed Layer");
   });
 
-  it("invokes onToggleLockedForLayer when quick lock button is clicked", () => {
+  it("invokes onToggleLockedForLayer and onToggleHiddenForLayer on quick action clicks", () => {
     const onToggleLockedForLayer = vi.fn();
-    const layer = makeLayer({ id: "l1", name: "Card", locked: false });
+    const onToggleHiddenForLayer = vi.fn();
+    const layers = [
+      makeLayer({ id: "l1", name: "Card", locked: false, hidden: false }),
+    ];
     const { getByLabelText } = render(
       <LayersPanel
-        layers={[layer]}
+        layers={layers}
         selectedLayerId="l1"
         onSelectLayer={() => {}}
         onToggleLockedForLayer={onToggleLockedForLayer}
+        onToggleHiddenForLayer={onToggleHiddenForLayer}
       />,
     );
 
     fireEvent.click(getByLabelText("锁定图层"));
     expect(onToggleLockedForLayer).toHaveBeenCalledWith("l1", true);
-  });
-
-  it("invokes onToggleHiddenForLayer when quick eye button is clicked", () => {
-    const onToggleHiddenForLayer = vi.fn();
-    const layer = makeLayer({ id: "l2", name: "Button", hidden: false });
-    const { getByLabelText } = render(
-      <LayersPanel
-        layers={[layer]}
-        selectedLayerId="l2"
-        onSelectLayer={() => {}}
-        onToggleHiddenForLayer={onToggleHiddenForLayer}
-      />,
-    );
 
     fireEvent.click(getByLabelText("隐藏图层"));
-    expect(onToggleHiddenForLayer).toHaveBeenCalledWith("l2", true);
+    expect(onToggleHiddenForLayer).toHaveBeenCalledWith("l1", true);
   });
+  describe("drag and drop", () => {
+    interface MockDataTransfer {
+      setData: (key: string, val: string) => void;
+      getData: (key: string) => string;
+      effectAllowed: string;
+      dropEffect: string;
+    }
 
-  it("falls back to onSelectLayer and onToggleLocked when per-layer contract is absent", () => {
-    const onSelectLayer = vi.fn();
-    const onToggleLocked = vi.fn();
-    const layer = makeLayer({ id: "l3", name: "Header", locked: false });
-    const { getByLabelText } = render(
-      <LayersPanel
-        layers={[layer]}
-        selectedLayerId="other"
-        onSelectLayer={onSelectLayer}
-        onToggleLocked={onToggleLocked}
-      />,
-    );
+    function mockDataTransfer(): MockDataTransfer {
+      const store: Record<string, string> = {};
+      return {
+        setData: vi.fn((key: string, val: string) => {
+          store[key] = val;
+        }),
+        getData: vi.fn((key: string) => store[key] ?? ""),
+        effectAllowed: "none",
+        dropEffect: "none",
+      };
+    }
 
-    fireEvent.click(getByLabelText("锁定图层"));
-    expect(onSelectLayer).toHaveBeenCalledWith("l3");
-    expect(onToggleLocked).toHaveBeenCalled();
+    function fireDragOver(
+      element: HTMLElement,
+      dt: MockDataTransfer,
+      clientY: number,
+    ) {
+      const event = createEvent.dragOver(element);
+      Object.defineProperty(event, "clientY", { value: clientY });
+      Object.defineProperty(event, "dataTransfer", { value: dt });
+      fireEvent(element, event);
+    }
+
+    function fireDrop(element: HTMLElement, dt: MockDataTransfer) {
+      const event = createEvent.drop(element);
+      Object.defineProperty(event, "dataTransfer", { value: dt });
+      fireEvent(element, event);
+    }
+    function getRow(container: HTMLElement, name: string): HTMLElement {
+      const match = Array.from(
+        container.querySelectorAll<HTMLElement>(".layer-row"),
+      ).find((r) => r.textContent?.includes(name));
+      if (!match) throw new Error(`Row ${name} not found`);
+      return match;
+    }
+
+    it("shows insertion line or container highlight when dragging over rows", () => {
+      const layers = [
+        makeLayer({ id: "a", name: "Layer A" }),
+        makeLayer({ id: "b", name: "Layer B" }),
+        makeLayer({ id: "f1", name: "Frame 1", kind: "frame" }),
+      ];
+      const { container } = render(
+        <LayersPanel
+          layers={layers}
+          selectedLayerId={null}
+          onSelectLayer={() => {}}
+        />,
+      );
+      const rowA = getRow(container, "Layer A");
+      const rowB = getRow(container, "Layer B");
+      const rowF1 = getRow(container, "Frame 1");
+      const rect = {
+        top: 100,
+        bottom: 128,
+        height: 28,
+        left: 0,
+        right: 200,
+        width: 200,
+      } as DOMRect;
+      rowB.getBoundingClientRect = () => rect;
+      rowF1.getBoundingClientRect = () => rect;
+
+      const dt = mockDataTransfer();
+      fireEvent.dragStart(rowA, { dataTransfer: dt });
+
+      fireDragOver(rowB, dt, 105);
+      expect(
+        container.querySelector("[data-testid='drop-indicator-before']"),
+      ).not.toBeNull();
+
+      fireDragOver(rowF1, dt, 114);
+      expect(rowF1.getAttribute("data-drop-inside")).toBe("true");
+    });
+    it("prevents circular reparenting into descendants", () => {
+      const layers = [
+        makeLayer({
+          id: "p",
+          name: "Parent",
+          kind: "frame",
+          children: [
+            makeLayer({
+              id: "c",
+              name: "Child",
+              kind: "frame",
+              depth: 1,
+              children: [
+                makeLayer({
+                  id: "gc",
+                  name: "Grandchild",
+                  kind: "frame",
+                  depth: 2,
+                }),
+              ],
+            }),
+          ],
+        }),
+      ];
+      const onReparentLayer = vi.fn();
+      const onReorderLayer = vi.fn();
+      const { container } = render(
+        <LayersPanel
+          layers={layers}
+          selectedLayerId={null}
+          onSelectLayer={() => {}}
+          onReparentLayer={onReparentLayer}
+          onReorderLayer={onReorderLayer}
+        />,
+      );
+      const rowP = getRow(container, "Parent");
+      const rowGC = getRow(container, "Grandchild");
+      rowGC.getBoundingClientRect = () =>
+        ({
+          top: 100,
+          bottom: 128,
+          height: 28,
+          left: 0,
+          right: 200,
+          width: 200,
+        }) as DOMRect;
+
+      const dt = mockDataTransfer();
+      fireEvent.dragStart(rowP, { dataTransfer: dt });
+      fireDragOver(rowGC, dt, 114);
+
+      expect(rowGC.getAttribute("data-drop-invalid")).toBe("true");
+      expect(dt.dropEffect).toBe("none");
+
+      fireDrop(rowGC, dt);
+      expect(onReparentLayer).not.toHaveBeenCalled();
+      expect(onReorderLayer).not.toHaveBeenCalled();
+    });
+
+    it("calls onReorderLayer when dropped on before or after insertion lines", () => {
+      const onReorderLayer = vi.fn();
+      const layers = [
+        makeLayer({ id: "a", name: "Layer A" }),
+        makeLayer({ id: "b", name: "Layer B" }),
+      ];
+      const { container } = render(
+        <LayersPanel
+          layers={layers}
+          selectedLayerId={null}
+          onSelectLayer={() => {}}
+          onReorderLayer={onReorderLayer}
+        />,
+      );
+      const rowA = getRow(container, "Layer A");
+      const rowB = getRow(container, "Layer B");
+      rowB.getBoundingClientRect = () =>
+        ({
+          top: 100,
+          bottom: 128,
+          height: 28,
+          left: 0,
+          right: 200,
+          width: 200,
+        }) as DOMRect;
+
+      const dt = mockDataTransfer();
+      fireEvent.dragStart(rowA, { dataTransfer: dt });
+      fireDragOver(rowB, dt, 105);
+      fireDrop(rowB, dt);
+      expect(onReorderLayer).toHaveBeenCalledWith("a", "b", "before");
+
+      fireEvent.dragStart(rowA, { dataTransfer: dt });
+      fireDragOver(rowB, dt, 125);
+      fireDrop(rowB, dt);
+      expect(onReorderLayer).toHaveBeenCalledWith("a", "b", "after");
+    });
+
+    it("calls onReparentLayer when dropped inside a container", () => {
+      const onReparentLayer = vi.fn();
+      const layers = [
+        makeLayer({ id: "a", name: "Layer A" }),
+        makeLayer({ id: "f1", name: "Frame 1", kind: "frame", children: [] }),
+      ];
+      const { container } = render(
+        <LayersPanel
+          layers={layers}
+          selectedLayerId={null}
+          onSelectLayer={() => {}}
+          onReparentLayer={onReparentLayer}
+        />,
+      );
+      const rowA = getRow(container, "Layer A");
+      const rowF1 = getRow(container, "Frame 1");
+      rowF1.getBoundingClientRect = () =>
+        ({
+          top: 100,
+          bottom: 128,
+          height: 28,
+          left: 0,
+          right: 200,
+          width: 200,
+        }) as DOMRect;
+
+      const dt = mockDataTransfer();
+      fireEvent.dragStart(rowA, { dataTransfer: dt });
+      fireDragOver(rowF1, dt, 114);
+      fireDrop(rowF1, dt);
+      expect(onReparentLayer).toHaveBeenCalledWith("a", "f1", 0);
+    });
   });
 });

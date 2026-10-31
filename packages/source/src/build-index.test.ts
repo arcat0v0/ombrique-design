@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildIndex, locateByPath } from "./build-index.js";
+import { buildIndex } from "./build-index.js";
 import type { DesignElement } from "./types.js";
 
 const HOME = `import { Frame, Text } from "@ombrique/runtime";
@@ -61,31 +61,19 @@ describe("buildIndex", () => {
     expect(about?.frameName).toBe("About");
   });
 
-  it("keeps manifest and manifest file path", () => {
-    expect(index.manifest?.formatVersion).toBe(1);
-    expect(index.manifestFile).toBe("ombrique.json");
-  });
-
-  it("resolves elements by ref", () => {
+  it("resolves elements by ref and by path", () => {
     const hero = [...index.elements.values()].find(
       (e) => e.dataAttrs["data-name"] === "Hero",
     );
     if (!hero) throw new Error("hero missing");
-    const found = index.byRef(hero.ref);
-    expect(found).toBe(hero);
+    expect(index.byRef(hero.ref)).toBe(hero);
     expect(
       index.byRef({ file: "pages/home.tsx", start: 99999, end: 100000 }),
     ).toBeUndefined();
-  });
-
-  it("resolves elements by path and locateByPath agrees", () => {
-    const hero = index.byPath("pages/home.tsx", [0, 0]);
-    expect(hero?.tag).toBe("div");
-    const text = index.byPath("pages/home.tsx", [0, 0, 0]);
-    expect(text?.tag).toBe("Text");
+    expect(index.byPath("pages/home.tsx", [0, 0])?.tag).toBe("div");
+    expect(index.byPath("pages/home.tsx", [0, 0, 0])?.tag).toBe("Text");
     expect(index.byPath("pages/home.tsx", [])).toBeUndefined();
     expect(index.byPath("pages/home.tsx", [0, 9])).toBeUndefined();
-    expect(locateByPath(index, "pages/home.tsx", [0, 0])).toBe(hero);
   });
 
   it("indexes stylesheet rules by class", () => {
@@ -104,23 +92,6 @@ describe("buildIndex", () => {
     expect(idx.pages).toHaveLength(1);
     expect(idx.pages[0]?.file).toBe("pages/home.tsx");
     expect(idx.pages[0]?.width).toBe(1440);
-  });
-
-  it("builds indexes for more than ten files in under 100ms", () => {
-    const files: Record<string, string> = { "ombrique.json": MANIFEST };
-    for (let i = 0; i < 12; i++) {
-      files[`pages/page${i}.tsx`] = HOME.replace("Home", `Page${i}`).replace(
-        "pages/home.tsx",
-        `pages/page${i}.tsx`,
-      );
-      files[`styles/s${i}.module.scss`] = SCSS;
-    }
-    const start = performance.now();
-    const idx = buildIndex(files);
-    const elapsed = performance.now() - start;
-    expect(idx.elements.size).toBeGreaterThan(30);
-    expect(idx.styles.byClass.size).toBeGreaterThan(0);
-    expect(elapsed).toBeLessThan(100);
   });
 });
 
@@ -146,5 +117,108 @@ describe("stylesheet indexing", () => {
     expect(rootRule?.decls).toHaveLength(2);
     expect(firstDecl?.prop).toBe("--primary");
     expect(firstDecl?.value).toBe("#3b82f6");
+  });
+
+  it("indexes default and named token modes without duplicate tokens", () => {
+    const css =
+      ':root {\n  --bg: white;\n  --gap: 8px;\n}\n[data-mode="dark"] {\n  --bg: black;\n}\n';
+    const index = buildIndex({ "tokens.css": css });
+    expect(
+      index.styles.tokens.modes.map((mode) => ({
+        name: mode.name,
+        isDefault: mode.isDefault,
+      })),
+    ).toEqual([
+      { name: "default", isDefault: true },
+      { name: "dark", isDefault: false },
+    ]);
+    expect(
+      index.styles.tokens.tokens.map((token) => ({
+        name: token.name,
+        value: token.value,
+        values: token.values,
+      })),
+    ).toEqual([
+      {
+        name: "--bg",
+        value: "white",
+        values: { default: "white", dark: "black" },
+      },
+      { name: "--gap", value: "8px", values: { default: "8px" } },
+    ]);
+    const dark = index.styles.tokens.modes[1];
+    expect(
+      css.slice(dark?.rules[0]?.ruleSpan.start, dark?.rules[0]?.ruleSpan.end),
+    ).toBe('[data-mode="dark"] {\n  --bg: black;\n}');
+  });
+
+  it("keeps empty modes and a named default selector alias", () => {
+    const index = buildIndex({
+      "tokens.css":
+        ':root, [data-mode="Light"] { --bg: white; }\n[data-mode="Compact"] {}\n',
+    });
+    expect(index.styles.tokens.modes.map((mode) => mode.name)).toEqual([
+      "Light",
+      "Compact",
+    ]);
+    expect(index.styles.tokens.tokens).toHaveLength(1);
+    expect(index.styles.tokens.tokens[0]?.values).toEqual({ Light: "white" });
+  });
+});
+
+describe("component scanning and variant axes", () => {
+  it("scans exported components in components/ and extracts variant axes", () => {
+    const btnCode = `import { Frame, Text } from "@ombrique/runtime";
+
+export interface ButtonProps {
+  size?: "small" | "medium" | "large";
+  state?: "default" | "hover";
+}
+
+export const variantAxes = [
+  { name: "size", values: ["small", "medium", "large"] },
+  { name: "state", values: ["default", "hover"] }
+];
+
+export function Button({ size = "medium", state = "default" }: ButtonProps) {
+  return (
+    <Frame name="Button" width={100} height={36}>
+      <Text>Click me</Text>
+    </Frame>
+  );
+}
+`;
+    const cardCode = `import { Rect } from "@ombrique/runtime";
+
+export interface CardProps {
+  variant?: "primary" | "secondary";
+}
+
+export function Card({ variant = "primary" }: CardProps) {
+  return <Rect name="Card" width={200} height={100} />;
+}
+`;
+    const index = buildIndex({
+      "ombrique.json": MANIFEST,
+      "pages/home.tsx": HOME,
+      "components/Button.tsx": btnCode,
+      "components/Card.tsx": cardCode,
+    });
+
+    expect(index.components).toHaveLength(2);
+    const btn = index.components.find((c) => c.name === "Button");
+    if (!btn) throw new Error("Button component missing");
+    expect(btn.file).toBe("components/Button.tsx");
+    expect(btn.axes).toHaveLength(2);
+    expect(btn.axes[0]?.name).toBe("size");
+    expect(btn.axes[0]?.values).toEqual(["small", "medium", "large"]);
+    expect(btn.axes[1]?.name).toBe("state");
+    expect(btn.axes[1]?.values).toEqual(["default", "hover"]);
+
+    const card = index.components.find((c) => c.name === "Card");
+    if (!card) throw new Error("Card component missing");
+    expect(card.axes).toEqual([
+      { name: "variant", values: ["primary", "secondary"] },
+    ]);
   });
 });

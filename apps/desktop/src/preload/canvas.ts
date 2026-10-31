@@ -9,6 +9,9 @@ contextBridge.exposeInMainWorld("ombriqueCanvas", {
   onProject: (cb: (payload: unknown) => void) => {
     ipcRenderer.on("ombrique:project", (_event, payload) => cb(payload));
   },
+  onFiles: (cb: (payload: unknown) => void) => {
+    ipcRenderer.on("ombrique:files", (_event, payload) => cb(payload));
+  },
   onHmr: (cb: (payload: HotPayload) => void) => {
     ipcRenderer.on("ombrique:hmr", (_event, payload) =>
       cb(payload as HotPayload),
@@ -32,6 +35,11 @@ contextBridge.exposeInMainWorld("ombriqueCanvas", {
       "ombrique:resolvedProps",
       "ombrique:export",
       "ombrique:perf500",
+      "ombrique:prototypeMode",
+      "ombrique:showHotspots",
+      "ombrique:navigatePage",
+      "ombrique:activePage",
+      "ombrique:comments",
     ]) {
       ipcRenderer.on(channel, (_event, payload) => cb({ channel, payload }));
     }

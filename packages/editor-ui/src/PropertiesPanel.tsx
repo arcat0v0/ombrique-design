@@ -1,15 +1,17 @@
 import {
+  CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   CombineIcon,
   ComponentIcon,
-  DownloadIcon,
   EyeIcon,
   ImageIcon,
   Link2Icon,
   LockIcon,
   PlusIcon,
+  Trash2Icon,
   Unlink2Icon,
+  ZapIcon,
 } from "lucide-react";
 import { type KeyboardEvent, useEffect, useMemo, useState } from "react";
 import {
@@ -28,6 +30,7 @@ import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -48,11 +51,20 @@ import {
 import { cn } from "@/lib/utils";
 import { parseStyleInput } from "./parseStyleInput";
 import type {
+  PageTab,
   SelectionSummary,
   StyleRow,
   StyleTarget,
   TokenItem,
+  TokenModeItem,
 } from "./types";
+import type { ExportSetting } from "@ombrique/protocol";
+import { CornerRadiusControl } from "./CornerRadiusControl";
+import { EffectSection } from "./EffectSection";
+import { ExportSection } from "./ExportSection";
+import { FillSection } from "./FillSection";
+import { StrokeSection } from "./StrokeSection";
+import { TypographySection } from "./TypographySection";
 const AUTO_LAYOUT_KEYS: Record<string, true> = {
   layout: true,
   align: true,
@@ -488,6 +500,8 @@ function AutoLayoutValueField({
 export interface PropertiesPanelProps {
   selection: SelectionSummary | null;
   tokens?: TokenItem[];
+  pages?: PageTab[];
+  activePageId?: string | null;
   onSetStyle: (
     key: string,
     value: string | number | boolean | null,
@@ -497,11 +511,15 @@ export interface PropertiesPanelProps {
   onSetName: (name: string) => void;
   onToggleHidden: () => void;
   onToggleLocked: () => void;
+  onSetAttrs?: (
+    attrs: Record<string, string | number | boolean | null>,
+  ) => void;
   onDetachInstance?: () => void;
   onFlattenSelection?: () => Promise<boolean> | undefined;
+  tokenModes?: TokenModeItem[];
   onExportNode?: (
-    format: "png" | "jpg" | "webp" | "svg" | "pdf",
-    scale: number,
+    formatOrSettings: "png" | "jpg" | "webp" | "svg" | "pdf" | ExportSetting[],
+    scale?: number,
   ) => Promise<boolean> | undefined;
 }
 
@@ -631,6 +649,8 @@ function classifyStyleGroups(styles: StyleRow[], tag?: string): StyleGroup[] {
   const isFrame = lowerTag ? isFrameTag(lowerTag) : false;
   const isImage = lowerTag === "image";
   const isBoolean = lowerTag === "boolean";
+  const isTextNode = lowerTag === "text";
+  const isRectOrFrame = lowerTag === "rect" || lowerTag === "frame";
 
   const shared: StyleRow[] = [];
   const geometry: StyleRow[] = [];
@@ -654,7 +674,52 @@ function classifyStyleGroups(styles: StyleRow[], tag?: string): StyleGroup[] {
     if (isBoolean && row.key === "op") {
       continue;
     }
+    if (lowerTag === "frame" && row.key === "mode") {
+      continue;
+    }
     if (isFrame && AUTO_LAYOUT_KEYS[row.key]) {
+      continue;
+    }
+    if (isTextNode && TYPOGRAPHY_KEYS[row.key]) {
+      continue;
+    }
+    if (
+      isRectOrFrame &&
+      (row.key === "borderRadius" ||
+        row.key === "radius" ||
+        row.key.startsWith("radius") ||
+        (row.key.startsWith("border") && row.key.endsWith("Radius")))
+    ) {
+      continue;
+    }
+    if (
+      row.key === "fill" ||
+      row.key === "background" ||
+      row.key === "backgroundImage" ||
+      row.key === "backgroundColor" ||
+      row.key === "backgroundSize" ||
+      row.key === "backgroundPosition"
+    ) {
+      continue;
+    }
+    if (
+      row.key === "stroke" ||
+      row.key === "strokeWidth" ||
+      row.key === "border" ||
+      row.key === "borderWidth" ||
+      row.key === "borderColor" ||
+      row.key === "borderTop" ||
+      row.key === "borderRight" ||
+      row.key === "borderBottom" ||
+      row.key === "borderLeft"
+    ) {
+      continue;
+    }
+    if (
+      row.key === "boxShadow" ||
+      row.key === "filter" ||
+      row.key === "backdropFilter"
+    ) {
       continue;
     }
 
@@ -1295,9 +1360,473 @@ function BooleanCard({
   );
 }
 
+interface ModeSectionProps {
+  selection: SelectionSummary;
+  tokenModes: TokenModeItem[];
+  disabled: boolean;
+  onSetAttrs?: (
+    attrs: Record<string, string | number | boolean | null>,
+  ) => void;
+  onSetStyle: (key: string, value: string | number | boolean | null) => void;
+}
+
+function ModeSection({
+  selection,
+  tokenModes,
+  disabled,
+  onSetAttrs,
+  onSetStyle,
+}: ModeSectionProps) {
+  if (selection.tag.toLowerCase() !== "frame") return null;
+  const current =
+    selection.styles.find((row) => row.key === "mode")?.value ??
+    selection.attrs.find((attr) => attr.key === "mode")?.value ??
+    "";
+  if (tokenModes.length === 0 && current === "") return null;
+  const choose = (value: string | null) => {
+    if (onSetAttrs) {
+      onSetAttrs({ mode: value });
+    } else {
+      onSetStyle("mode", value);
+    }
+  };
+  const options: Array<{ value: string | null; label: string }> = [
+    { value: null, label: "继承 (Inherit)" },
+    ...tokenModes.map((mode) => ({
+      value: mode.name,
+      label: mode.isDefault ? `${mode.name} (默认)` : mode.name,
+    })),
+  ];
+  if (current !== "" && !tokenModes.some((mode) => mode.name === current)) {
+    options.push({ value: current, label: current });
+  }
+  return (
+    <div className="properties-section flex flex-col gap-2 border-t border-border/40 pt-2">
+      <FieldGroup className="flex flex-col gap-1.5">
+        <Field className="flex flex-col gap-1">
+          <FieldLabel className="text-[10px] text-muted-foreground">
+            变量模式 (Mode)
+          </FieldLabel>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                disabled={disabled}
+                aria-label="选择变量模式"
+                data-testid="mode-trigger"
+                className="h-6 w-full justify-between px-2 text-[10px] font-normal"
+              >
+                <span className="truncate">
+                  {current === "" ? "继承 (Inherit)" : current}
+                </span>
+                <ChevronDownIcon className="size-3 opacity-60 shrink-0" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-48">
+              <DropdownMenuGroup>
+                {options.map((opt) => {
+                  const active = (opt.value ?? "") === current;
+                  return (
+                    <DropdownMenuItem
+                      key={opt.value ?? ""}
+                      onClick={() => choose(opt.value)}
+                      data-testid={`mode-option-${opt.value ?? "inherit"}`}
+                      className={cn(
+                        "text-xs cursor-pointer justify-between",
+                        active && "font-semibold text-primary",
+                      )}
+                    >
+                      <span>{opt.label}</span>
+                      {active && (
+                        <CheckIcon className="size-3 text-primary shrink-0" />
+                      )}
+                    </DropdownMenuItem>
+                  );
+                })}
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </Field>
+      </FieldGroup>
+    </div>
+  );
+}
+
+interface PrototypeSectionProps {
+  selection: SelectionSummary;
+  pages?: PageTab[];
+  disabled: boolean;
+  onSetAttrs?: (
+    attrs: Record<string, string | number | boolean | null>,
+  ) => void;
+  onSetStyle: (key: string, value: string | number | boolean | null) => void;
+}
+
+const TRIGGER_OPTIONS = [
+  { value: "click", label: "On Click (点击时)" },
+  { value: "hover", label: "On Hover (悬停时)" },
+];
+
+const ACTION_OPTIONS = [
+  { value: "navigate", label: "Navigate To (导航至页面)" },
+  { value: "overlay", label: "Open Overlay (打开悬浮层)" },
+];
+
+const TRANSITION_OPTIONS = [
+  { value: "instant", label: "Instant (即时)" },
+  { value: "dissolve", label: "Dissolve (渐变溶解)" },
+  { value: "slide-left", label: "Slide Left (左滑移入)" },
+  { value: "slide-right", label: "Slide Right (右滑移入)" },
+  { value: "slide-up", label: "Slide Up (上滑移入)" },
+  { value: "slide-down", label: "Slide Down (下滑移入)" },
+];
+
+function PrototypeSection({
+  selection,
+  pages = [],
+  disabled,
+  onSetAttrs,
+  onSetStyle,
+}: PrototypeSectionProps) {
+  const stylesByKey: Record<string, string> = {};
+  for (const s of selection.styles) {
+    if (s.value !== null && s.value !== undefined) {
+      stylesByKey[s.key] = String(s.value);
+    }
+  }
+  const attrsByKey: Record<string, string> = {};
+  for (const a of selection.attrs) {
+    attrsByKey[a.key] = a.value;
+  }
+
+  const navigateTarget =
+    stylesByKey.onClickNavigate || attrsByKey["data-prototype-navigate"] || "";
+
+  const hoverStyleStr =
+    stylesByKey.onHoverStyle || attrsByKey["data-prototype-hover"] || "";
+
+  const isConfigured = Boolean(navigateTarget || hoverStyleStr);
+
+  const initialTransition =
+    stylesByKey.transitionType ||
+    attrsByKey["data-prototype-transition"] ||
+    "instant";
+  let initialDuration = 300;
+  const rawDuration =
+    stylesByKey.transitionDuration || attrsByKey["data-prototype-duration"];
+  if (rawDuration) {
+    const n = Number(rawDuration);
+    if (!Number.isNaN(n)) initialDuration = n;
+  }
+
+  const [trigger, setTrigger] = useState(
+    hoverStyleStr && !navigateTarget ? "hover" : "click",
+  );
+  const [action, setAction] = useState(
+    hoverStyleStr && !navigateTarget ? "overlay" : "navigate",
+  );
+  const [destination, setDestination] = useState(navigateTarget);
+  const [transitionType, setTransitionType] = useState(initialTransition);
+  const [duration, setDuration] = useState(initialDuration);
+
+  useEffect(() => {
+    setDestination(navigateTarget);
+    setTrigger(hoverStyleStr && !navigateTarget ? "hover" : "click");
+    setAction(hoverStyleStr && !navigateTarget ? "overlay" : "navigate");
+    setTransitionType(initialTransition);
+    setDuration(initialDuration);
+  }, [navigateTarget, hoverStyleStr, initialTransition, initialDuration]);
+  if (!isFrameTag(selection.tag)) return null;
+
+  const commit = (updates: {
+    trigger?: string;
+    action?: string;
+    destination?: string;
+    transitionType?: string;
+    duration?: number;
+  }) => {
+    const nextAction = updates.action ?? action;
+    const nextDestination = updates.destination ?? destination;
+    const nextTransition = updates.transitionType ?? transitionType;
+    const nextDuration = updates.duration ?? duration;
+
+    const attrs: Record<string, string | number | boolean | null> = {};
+    if (nextAction === "navigate") {
+      attrs.onClickNavigate = nextDestination || null;
+      attrs.cursor = nextDestination ? "pointer" : null;
+      attrs.transitionType = nextDestination ? nextTransition : null;
+      attrs.transitionDuration = nextDestination ? nextDuration : null;
+      attrs.onHoverStyle = null;
+    } else {
+      attrs.onClickNavigate = nextDestination || null;
+      attrs.cursor = "pointer";
+      attrs.onHoverStyle = "{ opacity: 0.85 }";
+      attrs.transitionType = nextTransition;
+      attrs.transitionDuration = nextDuration;
+    }
+
+    if (onSetAttrs) {
+      onSetAttrs(attrs);
+    } else {
+      for (const [k, v] of Object.entries(attrs)) {
+        onSetStyle(k, v);
+      }
+    }
+  };
+
+  const clearInteraction = () => {
+    const clearAttrs = {
+      onClickNavigate: null,
+      cursor: null,
+      transitionType: null,
+      transitionDuration: null,
+      onHoverStyle: null,
+    };
+    if (onSetAttrs) {
+      onSetAttrs(clearAttrs);
+    } else {
+      for (const [k, v] of Object.entries(clearAttrs)) {
+        onSetStyle(k, v);
+      }
+    }
+    setDestination("");
+  };
+
+  const targetPageName =
+    pages.find((p) => p.id === destination || p.file === destination)?.name ??
+    destination;
+
+  return (
+    <div className="properties-section flex flex-col gap-2 border-t border-border/40 pt-2">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <ZapIcon className="size-3.5 text-primary" />
+          <span className="text-[11px] font-medium text-foreground">
+            交互原型 (Prototype)
+          </span>
+        </div>
+        {isConfigured && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            disabled={disabled}
+            onClick={clearInteraction}
+            className="size-5 text-muted-foreground hover:text-destructive"
+            title="移除交互"
+            aria-label="移除交互"
+          >
+            <Trash2Icon className="size-3" />
+          </Button>
+        )}
+      </div>
+
+      <FieldGroup className="flex flex-col gap-1.5">
+        <Field className="flex flex-col gap-1">
+          <FieldLabel className="text-[10px] text-muted-foreground">
+            触发方式 (Trigger)
+          </FieldLabel>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                disabled={disabled}
+                className="h-6 w-full justify-between px-2 text-[11px] font-normal"
+              >
+                <span>
+                  {TRIGGER_OPTIONS.find((t) => t.value === trigger)?.label ??
+                    trigger}
+                </span>
+                <ChevronDownIcon className="size-3 opacity-60" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-48">
+              <DropdownMenuGroup>
+                {TRIGGER_OPTIONS.map((opt) => (
+                  <DropdownMenuItem
+                    key={opt.value}
+                    onClick={() => {
+                      setTrigger(opt.value);
+                      commit({ trigger: opt.value });
+                    }}
+                    className="text-xs cursor-pointer"
+                  >
+                    <span>{opt.label}</span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </Field>
+
+        <Field className="flex flex-col gap-1">
+          <FieldLabel className="text-[10px] text-muted-foreground">
+            动作 (Action)
+          </FieldLabel>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                disabled={disabled}
+                className="h-6 w-full justify-between px-2 text-[11px] font-normal"
+              >
+                <span>
+                  {ACTION_OPTIONS.find((a) => a.value === action)?.label ??
+                    action}
+                </span>
+                <ChevronDownIcon className="size-3 opacity-60" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-48">
+              <DropdownMenuGroup>
+                {ACTION_OPTIONS.map((opt) => (
+                  <DropdownMenuItem
+                    key={opt.value}
+                    onClick={() => {
+                      setAction(opt.value);
+                      commit({ action: opt.value });
+                    }}
+                    className="text-xs cursor-pointer"
+                  >
+                    <span>{opt.label}</span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </Field>
+
+        <Field className="flex flex-col gap-1">
+          <FieldLabel className="text-[10px] text-muted-foreground">
+            目标页面 (Destination)
+          </FieldLabel>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                disabled={disabled}
+                className="h-6 w-full justify-between px-2 text-[11px] font-normal"
+              >
+                <span className="truncate">
+                  {targetPageName ? targetPageName : "选择目标页面..."}
+                </span>
+                <ChevronDownIcon className="size-3 opacity-60 shrink-0 ml-1" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-52">
+              <DropdownMenuGroup>
+                {pages.length === 0 ? (
+                  <DropdownMenuItem disabled className="text-xs">
+                    暂无可用页面
+                  </DropdownMenuItem>
+                ) : (
+                  pages.map((p) => (
+                    <DropdownMenuItem
+                      key={p.id}
+                      onClick={() => {
+                        setDestination(p.id);
+                        commit({ destination: p.id });
+                      }}
+                      className="text-xs cursor-pointer justify-between"
+                    >
+                      <span>{p.name}</span>
+                      <span className="text-[10px] text-muted-foreground font-mono">
+                        {p.id}
+                      </span>
+                    </DropdownMenuItem>
+                  ))
+                )}
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </Field>
+
+        <div className="grid grid-cols-2 gap-1.5">
+          <Field className="flex flex-col gap-1">
+            <FieldLabel className="text-[10px] text-muted-foreground">
+              转场动画 (Transition)
+            </FieldLabel>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  disabled={disabled}
+                  className="h-6 w-full justify-between px-2 text-[10px] font-normal"
+                >
+                  <span className="truncate">
+                    {TRANSITION_OPTIONS.find(
+                      (t) => t.value === transitionType,
+                    )?.label?.split(" ")[0] ?? transitionType}
+                  </span>
+                  <ChevronDownIcon className="size-3 opacity-60 shrink-0" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-48">
+                <DropdownMenuGroup>
+                  {TRANSITION_OPTIONS.map((opt) => (
+                    <DropdownMenuItem
+                      key={opt.value}
+                      onClick={() => {
+                        setTransitionType(opt.value);
+                        commit({ transitionType: opt.value });
+                      }}
+                      className="text-xs cursor-pointer"
+                    >
+                      <span>{opt.label}</span>
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </Field>
+
+          <Field className="flex flex-col gap-1">
+            <FieldLabel className="text-[10px] text-muted-foreground">
+              时长 (Duration ms)
+            </FieldLabel>
+            <Input
+              type="number"
+              min={0}
+              step={50}
+              value={duration}
+              disabled={disabled || transitionType === "instant"}
+              onChange={(e) => {
+                const val = Number.parseInt(e.target.value, 10);
+                const next = Number.isNaN(val) ? 0 : val;
+                setDuration(next);
+              }}
+              onBlur={() => {
+                commit({ duration });
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  commit({ duration });
+                }
+              }}
+              className="h-6 text-[11px] font-mono"
+            />
+          </Field>
+        </div>
+      </FieldGroup>
+    </div>
+  );
+}
+
 export function PropertiesPanel({
   selection,
   tokens,
+  pages,
+  activePageId: _activePageId,
   onSetStyle,
   onSetText,
   onSetName,
@@ -1305,7 +1834,9 @@ export function PropertiesPanel({
   onToggleLocked,
   onDetachInstance,
   onFlattenSelection,
+  onSetAttrs,
   onExportNode,
+  tokenModes = [],
 }: PropertiesPanelProps) {
   const [name, setName] = useState(selection?.name ?? "");
   const [text, setText] = useState(selection?.text ?? "");
@@ -1313,10 +1844,6 @@ export function PropertiesPanel({
     new Set(),
   );
   const [detachConfirmOpen, setDetachConfirmOpen] = useState(false);
-  const [exportFormat, setExportFormat] = useState<
-    "png" | "jpg" | "webp" | "svg" | "pdf"
-  >("png");
-  const [exportScale, setExportScale] = useState<number>(1);
   useEffect(() => {
     setName(selection?.name ?? "");
     setText(selection?.text ?? "");
@@ -1389,6 +1916,8 @@ export function PropertiesPanel({
   };
 
   if (selection === null) {
+    const activePage = pages?.find((p) => p.id === _activePageId);
+    const boardName = activePage?.name ?? "当前画板";
     return (
       <section
         className="properties-panel flex h-full flex-col bg-card/40 select-none"
@@ -1397,9 +1926,18 @@ export function PropertiesPanel({
         <div className="panel-heading flex h-8 items-center px-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           属性
         </div>
-        <div className="properties-empty flex flex-1 items-center justify-center p-4 text-xs text-muted-foreground">
-          未选择图层
-        </div>
+        <ScrollArea className="flex-1">
+          <div className="flex flex-col gap-3 p-3">
+            <div className="properties-empty flex items-center justify-center p-4 text-xs text-muted-foreground">
+              未选择图层
+            </div>
+            <ExportSection
+              targetName={boardName}
+              isBoard={true}
+              onExportNode={onExportNode}
+            />
+          </div>
+        </ScrollArea>
       </section>
     );
   }
@@ -1479,6 +2017,95 @@ export function PropertiesPanel({
                 <p className="text-[10px] leading-relaxed text-muted-foreground/90">
                   编辑此实例属性仅影响当前元素；双击将进入主组件源码。
                 </p>
+                {selection.variantAxes && selection.variantAxes.length > 0 && (
+                  <div
+                    className="variant-controls flex flex-col gap-2 pt-2 border-t border-primary/20"
+                    data-testid="variant-controls"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-semibold text-foreground">
+                        变体属性
+                      </span>
+                      <Badge
+                        variant="outline"
+                        className="h-4 px-1 text-[9px] font-mono text-muted-foreground"
+                      >
+                        {selection.variantAxes.length} 维
+                      </Badge>
+                    </div>
+
+                    <div className="flex flex-col gap-1.5">
+                      {selection.variantAxes.map((axis) => {
+                        const currentPropVal =
+                          selection.variantProps?.[axis.name] ??
+                          selection.attrs.find((a) => a.key === axis.name)
+                            ?.value ??
+                          axis.values[0];
+
+                        return (
+                          <div
+                            key={axis.name}
+                            className="flex items-center justify-between gap-2"
+                            data-testid={`variant-axis-${axis.name}`}
+                          >
+                            <span className="text-xs text-muted-foreground font-mono truncate">
+                              {axis.name}
+                            </span>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="xs"
+                                  className="h-6 min-w-24 justify-between gap-1 text-xs font-mono font-normal"
+                                  aria-label={`选择 ${axis.name}`}
+                                  disabled={disabled}
+                                  data-testid={`variant-trigger-${axis.name}`}
+                                >
+                                  <span className="truncate">
+                                    {String(currentPropVal)}
+                                  </span>
+                                  <ChevronDownIcon className="size-3 text-muted-foreground shrink-0" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent
+                                align="end"
+                                className="min-w-28 font-mono"
+                                data-testid={`variant-menu-${axis.name}`}
+                              >
+                                <DropdownMenuGroup>
+                                  {axis.values.map((val) => (
+                                    <DropdownMenuItem
+                                      key={val}
+                                      className={cn(
+                                        "text-xs cursor-pointer justify-between",
+                                        val === String(currentPropVal) &&
+                                          "font-semibold text-primary",
+                                      )}
+                                      onClick={() => {
+                                        if (onSetAttrs) {
+                                          onSetAttrs({ [axis.name]: val });
+                                        } else {
+                                          onSetStyle(axis.name, val);
+                                        }
+                                      }}
+                                      data-testid={`variant-option-${axis.name}-${val}`}
+                                    >
+                                      <span>{val}</span>
+                                      {val === String(currentPropVal) && (
+                                        <CheckIcon className="size-3 text-primary shrink-0" />
+                                      )}
+                                    </DropdownMenuItem>
+                                  ))}
+                                </DropdownMenuGroup>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 <AlertDialog
                   open={detachConfirmOpen}
@@ -1633,6 +2260,69 @@ export function PropertiesPanel({
               disabled={disabled}
               onSetStyle={onSetStyle}
             />
+            <ModeSection
+              selection={selection}
+              tokenModes={tokenModes}
+              disabled={disabled}
+              onSetAttrs={onSetAttrs}
+              onSetStyle={onSetStyle}
+            />
+            <PrototypeSection
+              selection={selection}
+              pages={pages}
+              disabled={disabled}
+              onSetAttrs={onSetAttrs}
+              onSetStyle={onSetStyle}
+            />
+            <Separator className="my-1" />
+
+            {(() => {
+              const tag = selection.tag.toLowerCase();
+              const isTextNode = tag === "text";
+              const isRectOrFrame = tag === "rect" || tag === "frame";
+
+              return (
+                <>
+                  {isTextNode && (
+                    <TypographySection
+                      selection={selection}
+                      disabled={disabled}
+                      onSetStyle={onSetStyle}
+                    />
+                  )}
+
+                  {isRectOrFrame && (
+                    <CornerRadiusControl
+                      selection={selection}
+                      disabled={disabled}
+                      onSetStyle={onSetStyle}
+                    />
+                  )}
+                </>
+              );
+            })()}
+
+            <Separator className="my-1" />
+
+            <FillSection
+              selection={selection}
+              disabled={disabled}
+              onSetStyle={onSetStyle}
+            />
+
+            <StrokeSection
+              selection={selection}
+              disabled={disabled}
+              onSetStyle={onSetStyle}
+            />
+
+            <EffectSection
+              selection={selection}
+              disabled={disabled}
+              onSetStyle={onSetStyle}
+            />
+
+            <Separator className="my-1" />
 
             <Separator className="my-1" />
 
@@ -1748,39 +2438,6 @@ export function PropertiesPanel({
                                 {isShape && !disabled && (
                                   <div className="flex flex-wrap gap-1 p-1.5">
                                     {!selection.styles.some(
-                                      (s) => s.key === "fill",
-                                    ) &&
-                                      !selection.styles.some(
-                                        (s) => s.key === "background",
-                                      ) && (
-                                        <Button
-                                          type="button"
-                                          variant="outline"
-                                          size="xs"
-                                          className="h-5 text-[10px] px-2"
-                                          onClick={() =>
-                                            onSetStyle("fill", "#d9d9d9")
-                                          }
-                                        >
-                                          + Fill
-                                        </Button>
-                                      )}
-                                    {!selection.styles.some(
-                                      (s) => s.key === "stroke",
-                                    ) && (
-                                      <Button
-                                        type="button"
-                                        variant="outline"
-                                        size="xs"
-                                        className="h-5 text-[10px] px-2"
-                                        onClick={() =>
-                                          onSetStyle("stroke", "#000000")
-                                        }
-                                      >
-                                        + Stroke
-                                      </Button>
-                                    )}
-                                    {!selection.styles.some(
                                       (s) => s.key === "opacity",
                                     ) && (
                                       <Button
@@ -1807,125 +2464,15 @@ export function PropertiesPanel({
             </div>
 
             {selection && (
-              <div
-                className="export-section flex flex-col gap-2 rounded-md border border-border bg-card/60 p-2.5 mt-1"
-                data-testid="export-section"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    <DownloadIcon className="size-3.5 text-primary shrink-0" />
-                    <span className="font-semibold text-xs text-foreground">
-                      导出 Export
-                    </span>
-                  </div>
-                  <span className="text-[10px] font-mono text-muted-foreground uppercase">
-                    {exportFormat} @ {exportScale}x
-                  </span>
-                </div>
-
-                <div className="flex flex-col gap-1.5">
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[10px] text-muted-foreground">
-                      格式 (Format)
-                    </span>
-                    <div className="flex items-center gap-1">
-                      {(["png", "jpg", "webp", "pdf", "svg"] as const).map(
-                        (fmt) => {
-                          const isSvg = fmt === "svg";
-                          const isVector =
-                            selection.tag.toLowerCase() === "vector" ||
-                            selection.kind === "vector";
-                          const fmtDisabled = disabled || (isSvg && !isVector);
-                          const active = exportFormat === fmt;
-                          const btn = (
-                            <Button
-                              key={fmt}
-                              type="button"
-                              variant={active ? "secondary" : "outline"}
-                              size="xs"
-                              disabled={fmtDisabled}
-                              onClick={() => setExportFormat(fmt)}
-                              className="h-6 flex-1 px-0.5 text-[10px] font-normal uppercase"
-                              aria-pressed={active}
-                              aria-label={`导出格式 ${fmt}`}
-                            >
-                              {fmt}
-                            </Button>
-                          );
-
-                          if (isSvg && !isVector) {
-                            return (
-                              <Tooltip key={fmt}>
-                                <TooltipTrigger asChild>
-                                  <span>{btn}</span>
-                                </TooltipTrigger>
-                                <TooltipContent side="top">
-                                  仅矢量可导出 SVG
-                                </TooltipContent>
-                              </Tooltip>
-                            );
-                          }
-                          return btn;
-                        },
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[10px] text-muted-foreground">
-                      倍率 (Scale)
-                    </span>
-                    <div className="flex items-center gap-1">
-                      {([1, 2, 3] as const).map((scale) => {
-                        const active = exportScale === scale;
-                        return (
-                          <Button
-                            key={scale}
-                            type="button"
-                            variant={active ? "secondary" : "outline"}
-                            size="xs"
-                            disabled={disabled}
-                            onClick={() => setExportScale(scale)}
-                            className="h-6 flex-1 px-1 text-[10px] font-normal"
-                            aria-pressed={active}
-                            aria-label={`导出倍率 ${scale}x`}
-                          >
-                            {scale}x
-                          </Button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="pt-1 border-t border-border/40 flex items-center justify-between">
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span className="w-full">
-                        <Button
-                          type="button"
-                          variant="default"
-                          size="xs"
-                          disabled={disabled || !onExportNode}
-                          onClick={() => {
-                            void onExportNode?.(exportFormat, exportScale);
-                          }}
-                          className="h-7 w-full gap-1.5 text-xs font-normal"
-                          aria-label="导出选中图层"
-                        >
-                          <DownloadIcon className="size-3.5" />
-                          <span>导出选中图层</span>
-                        </Button>
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">
-                      {onExportNode
-                        ? `以 ${exportFormat.toUpperCase()} @ ${exportScale}x 导出当前所选图层`
-                        : "核心尚未接线 exportNode"}
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-              </div>
+              <ExportSection
+                targetName={selection.name || selection.tag}
+                persistedRaw={
+                  selection.attrs.find((a) => a.key === "data-export")?.value
+                }
+                disabled={disabled}
+                onSetAttrs={onSetAttrs}
+                onExportNode={onExportNode}
+              />
             )}
           </div>
         </ScrollArea>

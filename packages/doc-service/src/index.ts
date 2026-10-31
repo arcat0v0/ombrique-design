@@ -27,3 +27,31 @@ export {
   type BundleManifest,
   type BundlePayload,
 } from "./bundle";
+export {
+  COMMENTS_FILE,
+  createEmptyCommentsDoc,
+  parseComments,
+  serializeComments,
+  createThread,
+  replyToThread,
+  resolveThread,
+  unresolveThread,
+  deleteThread,
+  deleteMessage,
+  loadComments,
+  saveComments,
+} from "./comments";
+export {
+  execGit,
+  isGitRepo,
+  getRepoRoot,
+  getCurrentBranch,
+  listBranches,
+  getGitStatus,
+  createBranch,
+  switchBranch,
+  listHistory,
+  saveVersion,
+  readPastVersion,
+  readPastVersionFiles,
+} from "./git";

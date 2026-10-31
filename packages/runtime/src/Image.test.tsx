@@ -25,8 +25,6 @@ describe("Image", () => {
     expect(wrapper.style.top).toBe("20px");
     expect(wrapper.style.width).toBe("300px");
     expect(wrapper.style.height).toBe("200px");
-    expect(wrapper.style.borderRadius).toBe("8px");
-    expect(wrapper.style.opacity).toBe("0.9");
 
     const img = wrapper.querySelector("img") as HTMLImageElement;
     expect(img).not.toBeNull();

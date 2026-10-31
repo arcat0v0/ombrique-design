@@ -144,7 +144,7 @@ function kindOf(tagName: string, runtimeImports: Set<string>): ElementKind {
   return "component";
 }
 
-function readAttrValue(attr: JSXAttribute): AttrValue {
+function readAttrValue(attr: JSXAttribute, code?: string): AttrValue {
   const attrSpan: Span = { start: attr.start, end: attr.end };
   const nameSpan: Span = { start: attr.name.start, end: attr.name.end };
   if (attr.value === null) {
@@ -193,6 +193,21 @@ function readAttrValue(attr: JSXAttribute): AttrValue {
           ? "number"
           : "boolean";
     return { kind, value: lit.value, valueSpan: lit.span, attrSpan };
+  }
+  if (
+    code &&
+    (container.expression.type === "ObjectExpression" ||
+      container.expression.type === "ArrayExpression")
+  ) {
+    const start = container.expression.start;
+    const end = container.expression.end;
+    const rawCode = code.slice(start, end).trim();
+    return {
+      kind: "expression",
+      value: rawCode,
+      valueSpan: { start, end },
+      attrSpan,
+    };
   }
   return {
     kind: "expression",
@@ -270,7 +285,7 @@ function buildElement(
     if (item.type !== "JSXAttribute") continue;
     const attr: JSXAttribute = item;
     const name = attrName(attr);
-    const attrValue = readAttrValue(attr);
+    const attrValue = readAttrValue(attr, ctx.code);
     element.attrs[name] = attrValue;
     if (name.startsWith("data-") && typeof attrValue.value === "string") {
       element.dataAttrs[name] = attrValue.value;

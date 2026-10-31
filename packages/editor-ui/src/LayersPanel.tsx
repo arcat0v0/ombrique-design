@@ -15,7 +15,13 @@ import {
   UnlockIcon,
   XIcon,
 } from "lucide-react";
-import { type KeyboardEvent, type MouseEvent, useMemo, useState } from "react";
+import {
+  type DragEvent,
+  type KeyboardEvent,
+  type MouseEvent,
+  useMemo,
+  useState,
+} from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -41,6 +47,16 @@ export interface LayersPanelProps {
   onToggleHiddenForLayer?: (layerId: string, hidden: boolean) => void;
   onToggleLockedForLayer?: (layerId: string, locked: boolean) => void;
   onDeleteSelection?: () => void;
+  onReparentLayer?: (
+    layerId: string,
+    newParentId: string | null,
+    index: number,
+  ) => void;
+  onReorderLayer?: (
+    layerId: string,
+    targetId: string,
+    position: "before" | "after",
+  ) => void;
 }
 
 function layerIcon(kind: LayerNode["kind"]) {
@@ -56,6 +72,16 @@ function layerIcon(kind: LayerNode["kind"]) {
     default:
       return SquareIcon;
   }
+}
+function isContainerNode(node: LayerNode): boolean {
+  return (
+    node.kind === "frame" ||
+    node.kind === "group" ||
+    node.kind === "component" ||
+    node.tag.toLowerCase() === "frame" ||
+    node.tag.toLowerCase() === "group" ||
+    node.tag.toLowerCase() === "section"
+  );
 }
 
 function filterNode(node: LayerNode, query: string): LayerNode | null {
@@ -86,11 +112,161 @@ export function LayersPanel({
   onToggleHiddenForLayer,
   onToggleLockedForLayer,
   onDeleteSelection,
+  onReparentLayer,
+  onReorderLayer,
 }: LayersPanelProps) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
   const [search, setSearch] = useState("");
+  const [draggedId, setDraggedId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<{
+    targetId: string;
+    position: "before" | "after" | "inside" | "invalid";
+  } | null>(null);
+
+  const { parentMap } = useMemo(() => {
+    const parentMap = new Map<string, LayerNode | null>();
+
+    function walk(nodes: LayerNode[], parent: LayerNode | null) {
+      for (const node of nodes) {
+        parentMap.set(node.id, parent);
+        if (node.children?.length) {
+          walk(node.children, node);
+        }
+      }
+    }
+
+    walk(layers, null);
+    return { parentMap };
+  }, [layers]);
+
+  const isDescendant = (
+    nodeId: string,
+    potentialAncestorId: string,
+  ): boolean => {
+    let curr = parentMap.get(nodeId);
+    while (curr) {
+      if (curr.id === potentialAncestorId) return true;
+      curr = parentMap.get(curr.id);
+    }
+    return false;
+  };
+
+  const handleDragStart = (e: DragEvent<HTMLElement>, node: LayerNode) => {
+    setDraggedId(node.id);
+    e.dataTransfer.setData("text/plain", node.id);
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleDragEnd = () => {
+    setDraggedId(null);
+    setDropTarget(null);
+  };
+
+  const handleDragOver = (e: DragEvent<HTMLElement>, node: LayerNode) => {
+    const activeDraggedId = draggedId || e.dataTransfer.getData("text/plain");
+    if (!activeDraggedId || activeDraggedId === node.id) {
+      return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (isDescendant(node.id, activeDraggedId)) {
+      e.dataTransfer.dropEffect = "none";
+      setDropTarget({ targetId: node.id, position: "invalid" });
+      return;
+    }
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    const rawY = typeof e.clientY === "number" ? e.clientY : rect.top + 14;
+    const y = rawY - rect.top;
+    const h = rect.height || 28;
+    const isContainer = isContainerNode(node);
+
+    let position: "before" | "after" | "inside";
+    if (isContainer) {
+      if (y < h * 0.25) {
+        position = "before";
+      } else if (y > h * 0.75) {
+        position = "after";
+      } else {
+        position = "inside";
+      }
+    } else {
+      position = y < h * 0.5 ? "before" : "after";
+    }
+
+    e.dataTransfer.dropEffect = "move";
+    setDropTarget({ targetId: node.id, position });
+  };
+
+  const handleDragLeave = (e: DragEvent<HTMLElement>, node: LayerNode) => {
+    const nextTarget = e.relatedTarget as Node | null;
+    if (nextTarget && e.currentTarget.contains(nextTarget)) {
+      return;
+    }
+    setDropTarget((prev) => (prev?.targetId === node.id ? null : prev));
+  };
+
+  const handleDrop = (e: DragEvent<HTMLElement>, node: LayerNode) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const sourceId = draggedId || e.dataTransfer.getData("text/plain");
+    if (!sourceId || sourceId === node.id) {
+      setDraggedId(null);
+      setDropTarget(null);
+      return;
+    }
+
+    if (isDescendant(node.id, sourceId)) {
+      setDraggedId(null);
+      setDropTarget(null);
+      return;
+    }
+
+    const currentPosition =
+      dropTarget?.targetId === node.id ? dropTarget.position : null;
+    if (!currentPosition || currentPosition === "invalid") {
+      setDraggedId(null);
+      setDropTarget(null);
+      return;
+    }
+
+    if (currentPosition === "inside") {
+      if (isContainerNode(node)) {
+        onReparentLayer?.(sourceId, node.id, node.children.length);
+      }
+    } else {
+      if (onReorderLayer) {
+        onReorderLayer(sourceId, node.id, currentPosition);
+      } else if (onReparentLayer) {
+        const targetParent = parentMap.get(node.id) ?? null;
+        const siblings = targetParent ? targetParent.children : layers;
+        const siblingsExcludingDragged = siblings.filter(
+          (s) => s.id !== sourceId,
+        );
+        const targetIndex = siblingsExcludingDragged.findIndex(
+          (s) => s.id === node.id,
+        );
+        const newIndex =
+          currentPosition === "before"
+            ? Math.max(0, targetIndex)
+            : targetIndex >= 0
+              ? targetIndex + 1
+              : siblingsExcludingDragged.length;
+        onReparentLayer(
+          sourceId,
+          targetParent ? targetParent.id : null,
+          newIndex,
+        );
+      }
+    }
+
+    setDraggedId(null);
+    setDropTarget(null);
+  };
 
   const toggleCollapsed = (id: string, e: MouseEvent) => {
     e.stopPropagation();
@@ -158,6 +334,14 @@ export function LayersPanel({
       action();
     };
 
+    const isDragging = draggedId === node.id;
+    const isCurrentDropTarget = dropTarget?.targetId === node.id;
+    const dropPosition = isCurrentDropTarget ? dropTarget.position : null;
+    const isDropInside = dropPosition === "inside";
+    const isDropInvalid = dropPosition === "invalid";
+    const showBeforeLine = dropPosition === "before";
+    const showAfterLine = dropPosition === "after";
+
     return (
       <div key={node.id} className="flex flex-col">
         <ContextMenu>
@@ -165,7 +349,17 @@ export function LayersPanel({
             <div
               tabIndex={0}
               role="treeitem"
+              draggable={!isEditing}
+              onDragStart={(e) => handleDragStart(e, node)}
+              onDragEnd={handleDragEnd}
+              onDragOver={(e) => handleDragOver(e, node)}
+              onDragLeave={(e) => handleDragLeave(e, node)}
+              onDrop={(e) => handleDrop(e, node)}
               aria-selected={selected}
+              data-layer-id={node.id}
+              data-dragging={isDragging ? "true" : undefined}
+              data-drop-inside={isDropInside ? "true" : undefined}
+              data-drop-invalid={isDropInvalid ? "true" : undefined}
               data-hidden={node.hidden ? "true" : undefined}
               data-generated={node.generated ? "true" : undefined}
               onClick={handleClick}
@@ -173,13 +367,40 @@ export function LayersPanel({
               onDoubleClick={(e) => startRename(node, e)}
               style={{ paddingLeft: 8 + node.depth * 12 }}
               className={cn(
-                "layer-row group flex h-7 w-full max-w-full items-center gap-1.5 pr-2 text-left text-xs font-normal outline-none cursor-pointer transition-colors select-none overflow-hidden box-border",
+                "layer-row group relative flex h-7 w-full max-w-full items-center gap-1.5 pr-2 text-left text-xs font-normal outline-none cursor-pointer transition-colors select-none overflow-hidden box-border",
                 selected
                   ? "layer-row-selected bg-accent text-accent-foreground font-medium"
                   : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
                 node.hidden && "layer-row-hidden opacity-40",
+                isDragging && "opacity-40 cursor-grabbing",
+                isDropInside &&
+                  "bg-blue-500/20 text-foreground ring-1 ring-inset ring-blue-500",
+                isDropInvalid &&
+                  "bg-destructive/10 cursor-no-drop ring-1 ring-inset ring-destructive/40",
               )}
             >
+              {showBeforeLine && (
+                <div
+                  data-testid="drop-indicator-before"
+                  className="layer-drop-indicator layer-drop-indicator-before absolute top-0 left-0 right-0 h-[2px] bg-blue-500 z-30 pointer-events-none"
+                >
+                  <div
+                    className="absolute -top-[3px] size-2 rounded-full bg-blue-500 ring-2 ring-background"
+                    style={{ left: Math.max(2, 8 + node.depth * 12 - 4) }}
+                  />
+                </div>
+              )}
+              {showAfterLine && (
+                <div
+                  data-testid="drop-indicator-after"
+                  className="layer-drop-indicator layer-drop-indicator-after absolute bottom-0 left-0 right-0 h-[2px] bg-blue-500 z-30 pointer-events-none"
+                >
+                  <div
+                    className="absolute -top-[3px] size-2 rounded-full bg-blue-500 ring-2 ring-background"
+                    style={{ left: Math.max(2, 8 + node.depth * 12 - 4) }}
+                  />
+                </div>
+              )}
               {hasChildren ? (
                 <button
                   type="button"
@@ -405,6 +626,21 @@ export function LayersPanel({
           <div
             role="tree"
             className="flex flex-col py-1 w-full overflow-hidden"
+            onDragOver={(e) => {
+              if (draggedId) {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+              }
+            }}
+            onDrop={(e) => {
+              if (e.target === e.currentTarget && draggedId) {
+                e.preventDefault();
+                e.stopPropagation();
+                onReparentLayer?.(draggedId, null, layers.length);
+                setDraggedId(null);
+                setDropTarget(null);
+              }
+            }}
           >
             {filteredLayers.map((layer) => renderItem(layer))}
           </div>

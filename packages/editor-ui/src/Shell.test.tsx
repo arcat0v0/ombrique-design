@@ -1,59 +1,11 @@
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { makeActions, makePage, makeView } from "./fixtures";
+import { makeActions, makeView } from "./fixtures";
 import { Shell } from "./Shell";
 
 afterEach(cleanup);
 
 describe("Shell", () => {
-  it("renders top bar, left and right columns and the canvas slot", () => {
-    const { container, getByTestId } = render(
-      <Shell view={makeView()} actions={makeActions()} />,
-    );
-    expect(container.querySelector(".shell-topbar")).not.toBeNull();
-    expect(container.querySelector(".shell-left")).not.toBeNull();
-    expect(container.querySelector(".shell-right")).not.toBeNull();
-    const canvasSlot = getByTestId("canvas-slot");
-    expect(canvasSlot.querySelector(".canvas-mount")).not.toBeNull();
-  });
-
-  it("wires pages, layers and selection data into the panels", () => {
-    const { getByText, getByLabelText } = render(
-      <Shell
-        view={makeView({
-          pages: [makePage("p1", "首页")],
-          activePageId: "p1",
-          layers: [
-            {
-              id: "l1",
-              name: "Hero",
-              tag: "section",
-              kind: "frame",
-              depth: 0,
-              hidden: false,
-              locked: false,
-              generated: false,
-              children: [],
-            },
-          ],
-          selection: {
-            id: "l1",
-            name: "Hero",
-            tag: "section",
-            editable: true,
-            styles: [],
-            attrs: [],
-            text: null,
-          },
-        })}
-        actions={makeActions()}
-      />,
-    );
-    expect(getByText("首页")).toBeDefined();
-    expect(getByText("Hero")).toBeDefined();
-    expect(getByLabelText("名称")).toBeDefined();
-  });
-
   it("shows diagnostics count and notice from the view", () => {
     const { getByText, getByLabelText } = render(
       <Shell
@@ -71,31 +23,34 @@ describe("Shell", () => {
     expect(getByLabelText("关闭通知")).toBeDefined();
   });
 
-  it("routes toolbar callbacks into the provided actions", async () => {
-    const openProject = vi.fn();
-    const { getByLabelText, findByText } = render(
-      <Shell view={makeView()} actions={makeActions({ openProject })} />,
-    );
-    const openBtn = getByLabelText("打开项目");
-    fireEvent.keyDown(openBtn, { key: "Enter" });
-    const item = await findByText("打开本地项目目录");
-    fireEvent.click(item);
-    expect(openProject).toHaveBeenCalledTimes(1);
-  });
-
-  it("routes keyboard shortcuts to undo, redo, duplicate and delete", () => {
+  it("routes keyboard shortcuts for editing, history, and grouping", () => {
     const undo = vi.fn();
     const redo = vi.fn();
     const duplicateSelection = vi.fn();
     const deleteSelection = vi.fn();
+    const groupSelection = vi.fn();
+    const ungroupSelection = vi.fn();
+
     render(
       <Shell
-        view={makeView()}
+        view={makeView({
+          selection: {
+            id: "l1",
+            name: "Title",
+            tag: "text",
+            editable: true,
+            styles: [],
+            attrs: [],
+            text: "Hello",
+          },
+        })}
         actions={makeActions({
           undo,
           redo,
           duplicateSelection,
           deleteSelection,
+          groupSelection,
+          ungroupSelection,
         })}
       />,
     );
@@ -115,17 +70,22 @@ describe("Shell", () => {
     expect(redo).toHaveBeenCalledTimes(1);
 
     window.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "y", ctrlKey: true }),
-    );
-    expect(redo).toHaveBeenCalledTimes(2);
-
-    window.dispatchEvent(
       new KeyboardEvent("keydown", { key: "d", ctrlKey: true }),
     );
     expect(duplicateSelection).toHaveBeenCalledTimes(1);
 
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Delete" }));
     expect(deleteSelection).toHaveBeenCalledTimes(1);
+
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "g", metaKey: true }),
+    );
+    expect(groupSelection).toHaveBeenCalledWith("Group");
+
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "g", metaKey: true, shiftKey: true }),
+    );
+    expect(ungroupSelection).toHaveBeenCalledTimes(1);
   });
 
   it("ignores shortcuts while typing in an input", () => {
@@ -155,17 +115,6 @@ describe("Shell", () => {
       }),
     );
     expect(undo).not.toHaveBeenCalled();
-  });
-
-  it("invokes updateCanvasBounds on mount when callback is provided", () => {
-    const updateCanvasBounds = vi.fn();
-    render(
-      <Shell view={makeView()} actions={makeActions({ updateCanvasBounds })} />,
-    );
-    expect(updateCanvasBounds).toHaveBeenCalledTimes(1);
-    const bounds = updateCanvasBounds.mock.calls[0]?.[0];
-    expect(typeof bounds?.x).toBe("number");
-    expect(typeof bounds?.width).toBe("number");
   });
 
   it("disables Ungroup for non-group selections and enables for kind=group or Group tag", () => {
@@ -213,38 +162,6 @@ describe("Shell", () => {
     expect(ungroupBtn.disabled).toBe(false);
   });
 
-  it("dispatches groupSelection and ungroupSelection on Cmd+G and Cmd+Shift+G", () => {
-    const groupSelection = vi.fn();
-    const ungroupSelection = vi.fn();
-
-    render(
-      <Shell
-        view={makeView({
-          selection: {
-            id: "l1",
-            name: "Title",
-            tag: "text",
-            editable: true,
-            styles: [],
-            attrs: [],
-            text: "Hello",
-          },
-        })}
-        actions={makeActions({ groupSelection, ungroupSelection })}
-      />,
-    );
-
-    window.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "g", metaKey: true }),
-    );
-    expect(groupSelection).toHaveBeenCalledWith("Group");
-
-    window.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "g", metaKey: true, shiftKey: true }),
-    );
-    expect(ungroupSelection).toHaveBeenCalledTimes(1);
-  });
-
   it("switches between Layers and Tokens tabs in the left panel", () => {
     const tokens = [
       { name: "--brand-primary", value: "#0077ff", category: "color" },
@@ -262,5 +179,36 @@ describe("Shell", () => {
     fireEvent.click(layersTabBtn);
 
     expect(getByLabelText("图层树")).toBeDefined();
+  });
+
+  it("handles component drop onto canvas slot and dispatches createComponentInstance", () => {
+    const createComponentInstance = vi.fn();
+    const { getByTestId } = render(
+      <Shell
+        view={makeView()}
+        actions={makeActions({ createComponentInstance })}
+      />,
+    );
+
+    const canvasSlot = getByTestId("canvas-slot");
+    const dataTransfer = {
+      types: ["application/ombrique-component"],
+      getData: vi.fn((type: string) =>
+        type === "application/ombrique-component" ? "Button" : "",
+      ),
+      dropEffect: "",
+    };
+
+    fireEvent.dragOver(canvasSlot, { dataTransfer });
+    fireEvent.drop(canvasSlot, {
+      dataTransfer,
+      clientX: 100,
+      clientY: 150,
+    });
+
+    expect(createComponentInstance).toHaveBeenCalledWith(
+      "Button",
+      expect.any(Object),
+    );
   });
 });

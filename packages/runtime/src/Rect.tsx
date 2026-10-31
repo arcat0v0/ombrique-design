@@ -9,6 +9,10 @@ export interface RectProps extends HTMLAttributes<HTMLDivElement> {
   height: number;
   fill: string;
   radius?: number;
+  radiusTopLeft?: number;
+  radiusTopRight?: number;
+  radiusBottomRight?: number;
+  radiusBottomLeft?: number;
   stroke?: string;
   strokeWidth?: number;
   opacity?: number;
@@ -21,6 +25,10 @@ export function Rect({
   height,
   fill,
   radius,
+  radiusTopLeft,
+  radiusTopRight,
+  radiusBottomRight,
+  radiusBottomLeft,
   stroke,
   strokeWidth,
   opacity,
@@ -40,6 +48,10 @@ export function Rect({
         height,
         background: fill,
         borderRadius: radius,
+        borderTopLeftRadius: radiusTopLeft,
+        borderTopRightRadius: radiusTopRight,
+        borderBottomRightRadius: radiusBottomRight,
+        borderBottomLeftRadius: radiusBottomLeft,
         border:
           stroke === undefined
             ? undefined

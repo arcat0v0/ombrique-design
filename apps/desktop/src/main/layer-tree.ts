@@ -3,6 +3,7 @@ import type { DesignElement } from "@ombrique/source";
 export function toLayer(
   element: DesignElement,
   depth = 0,
+  parentId: string | null = null,
 ): Record<string, unknown> {
   const tag = element.tag.toLowerCase();
   const isGroupTag = tag === "group";
@@ -45,8 +46,16 @@ export function toLayer(
     .map((t) => t.value)
     .join("")
     .trim();
+  const id = element.path.join("/");
   return {
-    id: element.path.join("/"),
+    id,
+    parentId,
+    ref: {
+      file: element.ref.file,
+      start: element.ref.start,
+      end: element.ref.end,
+      path: element.path,
+    },
     name:
       element.dataAttrs["data-name"] ??
       (typeof element.attrs.name?.value === "string"
@@ -63,6 +72,6 @@ export function toLayer(
     hidden: element.attrs.hidden?.value === true,
     locked: element.dataAttrs["data-locked"] !== undefined,
     generated: element.generated,
-    children: element.children.map((child) => toLayer(child, depth + 1)),
+    children: element.children.map((child) => toLayer(child, depth + 1, id)),
   };
 }

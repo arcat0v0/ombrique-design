@@ -3,7 +3,10 @@ import type {
   EditCommand,
   NodeRef,
   NodeSpec,
+  VariantAxis,
 } from "../../protocol/src/index.js";
+import { tokenModeNameSchema } from "../../protocol/src/index.js";
+import { parseStylesheet, parseTokenTable } from "./parse-stylesheet.js";
 import { applyEdits } from "./apply-edits.js";
 import type { DesignIndex } from "./build-index.js";
 import { parseDesignFile } from "./parse-design-file.js";
@@ -12,6 +15,7 @@ import type {
   ParsedDesignFile,
   PlanResult,
   Span,
+  StylesheetRule,
   TextEdit,
 } from "./types.js";
 
@@ -87,6 +91,20 @@ function genSpec(spec: NodeSpec): string {
     const styleAttr = `style={{ ${style.join(", ")} }}`;
     return `<Text ${styleAttr}>${escapeJsxText(spec.text)}</Text>`;
   }
+  if (spec.kind === "component") {
+    const propsList: string[] = [];
+    if (spec.name) propsList.push(`data-name=${JSON.stringify(spec.name)}`);
+    if (spec.x !== undefined) propsList.push(`x={${spec.x}}`);
+    if (spec.y !== undefined) propsList.push(`y={${spec.y}}`);
+    if (spec.props) {
+      for (const [k, v] of Object.entries(spec.props)) {
+        if (typeof v === "string") propsList.push(`${k}=${JSON.stringify(v)}`);
+        else propsList.push(`${k}={${v}}`);
+      }
+    }
+    const propStr = propsList.length > 0 ? ` ${propsList.join(" ")}` : "";
+    return `<${spec.componentName}${propStr} />`;
+  }
   const nameAttr = `data-name=${JSON.stringify(spec.name)}`;
   if (spec.kind === "image") {
     const style = [
@@ -106,6 +124,16 @@ function genSpec(spec: NodeSpec): string {
       ? ` fill=${JSON.stringify(spec.fill)}`
       : ` fill="#d9d9d9"`;
   const geomAttrs = `x={${spec.x}} y={${spec.y}} width={${spec.width}} height={${spec.height}}`;
+  if (spec.kind === "path") {
+    const dAttr = ` d=${JSON.stringify(spec.d)}`;
+    const strokeAttr =
+      spec.stroke !== undefined ? ` stroke=${JSON.stringify(spec.stroke)}` : "";
+    const strokeWidthAttr =
+      spec.strokeWidth !== undefined
+        ? ` strokeWidth={${spec.strokeWidth}}`
+        : "";
+    return `<Path ${nameAttr} ${geomAttrs}${dAttr}${fillAttr}${strokeAttr}${strokeWidthAttr} />`;
+  }
   if (spec.kind === "frame")
     return `<Frame ${nameAttr} ${geomAttrs}${fillAttr} />`;
   if (spec.kind === "rect")
@@ -728,7 +756,16 @@ class Planner {
         if (existing?.kind === "boolean" && existing.value === true) continue;
         text = name;
       } else if (typeof value === "string") {
-        text = `${name}=${JSON.stringify(value)}`;
+        const trimmed = value.trim();
+        if (
+          name === "onHoverStyle" &&
+          trimmed.startsWith("{") &&
+          trimmed.endsWith("}")
+        ) {
+          text = `${name}={${trimmed}}`;
+        } else {
+          text = `${name}=${JSON.stringify(value)}`;
+        }
       } else {
         text = `${name}={${value}}`;
       }
@@ -767,6 +804,7 @@ class Planner {
       rect: "Rect",
       ellipse: "Ellipse",
       star: "Star",
+      path: "Path",
       text: "Text",
       image: "Image",
     };
@@ -775,6 +813,25 @@ class Planner {
       .filter((name): name is string => Boolean(name));
     const importEdit = this.ensureRuntimeImports(parentEl.ref.file, needed);
     if (importEdit) edits.push(importEdit);
+    for (const spec of specs) {
+      if (spec.kind === "component") {
+        const importPath = parentEl.ref.file.startsWith("pages/")
+          ? `../components/${spec.componentName}`
+          : `./${spec.componentName}`;
+        const importLine = `import { ${spec.componentName} } from "${importPath}";\n`;
+        if (
+          !code.includes(importLine) &&
+          !code.includes(`import { ${spec.componentName} }`)
+        ) {
+          edits.push({
+            file: parentEl.ref.file,
+            start: 0,
+            end: 0,
+            text: importLine,
+          });
+        }
+      }
+    }
     return edits;
   }
 
@@ -1148,62 +1205,204 @@ class Planner {
     return trimmed.startsWith("--") ? trimmed : `--${trimmed}`;
   }
 
-  setTokenValue(name: string, value: string): TextEdit[] {
+  private tokenTable() {
+    const code = this.texts.get("tokens.css");
+    return parseTokenTable(
+      code === undefined ? undefined : parseStylesheet("tokens.css", code),
+    );
+  }
+
+  private insertToken(
+    rule: StylesheetRule,
+    prop: string,
+    value: string,
+  ): TextEdit[] {
     const file = "tokens.css";
+    const code = this.textOf(file);
+    const closing = rule.ruleSpan.end - 1;
+    const closingLine = lineStart(code, closing);
+    const ownLine = code.slice(closingLine, closing).trim().length === 0;
+    const first = rule.decls[0];
+    const indent = first
+      ? code.slice(lineStart(code, first.propSpan.start), first.propSpan.start)
+      : "  ";
+    const indentation = /^\s*$/.test(indent) ? indent : "  ";
+    const start = ownLine ? closingLine : closing;
+    const last = rule.decls.at(-1);
+    const needsSemicolon =
+      last &&
+      !code.slice(last.valueSpan.end, start).trimStart().startsWith(";");
+    const separator = needsSemicolon ? ";" : "";
+    const text = ownLine
+      ? `${separator}${indentation}${prop}: ${value};\n`
+      : `${separator}\n${indentation}${prop}: ${value};\n`;
+    return [{ file, start, end: start, text }];
+  }
+
+  setTokenValue(name: string, value: string, modeName?: string): TextEdit[] {
     const prop = this.normalizeTokenName(name);
-    const sheet = this.index.styles.files.get(file);
-    if (!sheet) {
-      return this.createToken(name, value);
+    const table = this.tokenTable();
+    const mode =
+      modeName === undefined
+        ? table.modes.find((item) => item.isDefault)
+        : table.modes.find((item) => item.name === modeName);
+    if (!mode) throw new Error(`Unknown token mode: ${modeName}`);
+    for (const rule of [...mode.rules].reverse()) {
+      const decl = [...rule.decls].reverse().find((item) => item.prop === prop);
+      if (decl)
+        return [
+          {
+            file: "tokens.css",
+            start: decl.valueSpan.start,
+            end: decl.valueSpan.end,
+            text: value,
+          },
+        ];
     }
-    for (const rule of sheet.rules) {
-      for (const decl of rule.decls) {
-        if (decl.prop === prop) {
-          return [
-            {
-              file,
-              start: decl.valueSpan.start,
-              end: decl.valueSpan.end,
-              text: value,
-            },
-          ];
-        }
-      }
-    }
+    const rule = mode.rules.at(-1);
+    if (rule) return this.insertToken(rule, prop, value);
     return this.createToken(name, value);
   }
 
   createToken(name: string, value: string): TextEdit[] {
     const file = "tokens.css";
     const prop = this.normalizeTokenName(name);
-    const code = this.index.sources.get(file);
-    if (code === undefined || code.trim().length === 0) {
-      const text = `:root {\n  ${prop}: ${value};\n}\n`;
-      return [{ file, start: 0, end: code ? code.length : 0, text }];
-    }
-    const sheet = this.index.styles.files.get(file);
-    const rootRule = sheet?.rules.find(
-      (r) => r.selector.trim() === ":root" || r.fullSelector.trim() === ":root",
-    );
-    if (rootRule && rootRule.decls.length > 0) {
-      const lastDecl = rootRule.decls[rootRule.decls.length - 1];
-      if (!lastDecl) throw new Error("token root rule has no declarations");
-      const insertPos = lastDecl.valueSpan.end;
-      let semiPos = insertPos;
-      while (semiPos < code.length && code[semiPos] !== ";") semiPos++;
-      if (semiPos < code.length && code[semiPos] === ";") semiPos++;
-      const text = `\n  ${prop}: ${value};`;
-      return [{ file, start: semiPos, end: semiPos, text }];
-    }
-    const rootMatch = code.indexOf(":root");
-    if (rootMatch !== -1) {
-      const openBrace = code.indexOf("{", rootMatch);
-      if (openBrace !== -1) {
-        const text = `\n  ${prop}: ${value};`;
-        return [{ file, start: openBrace + 1, end: openBrace + 1, text }];
+    const code = this.texts.get(file) ?? "";
+    const root = this.tokenTable()
+      .modes.find((mode) => mode.isDefault)
+      ?.rules.at(-1);
+    if (root) return this.insertToken(root, prop, value);
+    const text = `${code.trim().length > 0 ? "\n" : ""}:root {\n  ${prop}: ${value};\n}\n`;
+    return [{ file, start: code.length, end: code.length, text }];
+  }
+
+  addTokenMode(name: string): TextEdit[] {
+    tokenModeNameSchema.parse(name);
+    const table = this.tokenTable();
+    if (table.modes.some((mode) => mode.name === name))
+      throw new Error(`Token mode already exists: ${name}`);
+    const code = this.texts.get("tokens.css") ?? "";
+    const declarations = table.tokens
+      .filter((token) => token.value !== "")
+      .map((token) => `  ${token.name}: ${token.value};`)
+      .join("\n");
+    const root = table.modes.find((mode) => mode.isDefault);
+    const prefix = root?.rules.length ? "" : ":root {\n}\n";
+    const text = `${prefix}\n[data-mode="${name}"] {\n${declarations}${declarations ? "\n" : ""}}\n`;
+    return [{ file: "tokens.css", start: code.length, end: code.length, text }];
+  }
+
+  private modeReferences(name: string, value: string | null): TextEdit[] {
+    const edits: TextEdit[] = [];
+    for (const [file] of this.texts) {
+      if (!file.endsWith(".tsx")) continue;
+      for (const element of this.parsedOf(file).elements) {
+        const mode = element.attrs.mode;
+        if (element.tag === "Frame" && mode?.value === name) {
+          if (value === null) {
+            const code = this.textOf(file);
+            const start = /[ \t]/.test(code[mode.attrSpan.start - 1] ?? "")
+              ? mode.attrSpan.start - 1
+              : mode.attrSpan.start;
+            edits.push({ file, start, end: mode.attrSpan.end, text: "" });
+          } else if (mode.valueSpan) {
+            edits.push({
+              file,
+              start: mode.valueSpan.start,
+              end: mode.valueSpan.end,
+              text: JSON.stringify(value),
+            });
+          }
+        }
       }
     }
-    const text = `\n:root {\n  ${prop}: ${value};\n}\n`;
-    return [{ file, start: code.length, end: code.length, text }];
+    return edits;
+  }
+
+  renameTokenMode(name: string, newName: string): TextEdit[] {
+    tokenModeNameSchema.parse(newName);
+    const table = this.tokenTable();
+    const mode = table.modes.find((item) => item.name === name);
+    if (!mode) throw new Error(`Unknown token mode: ${name}`);
+    if (name === newName) return [];
+    if (table.modes.some((item) => item.name === newName))
+      throw new Error(`Token mode already exists: ${newName}`);
+    const edits = this.modeReferences(name, newName);
+    const code = this.texts.get("tokens.css") ?? "";
+    if (!mode.rules.length)
+      return [
+        ...edits,
+        {
+          file: "tokens.css",
+          start: code.length,
+          end: code.length,
+          text: `\n:root, [data-mode="${newName}"] {\n}\n`,
+        },
+      ];
+    for (const rule of mode.rules) {
+      const match =
+        /\[data-mode\s*=\s*(?:"([^"\\]+)"|'([^'\\]+)'|([\w-]+))\s*\]/.exec(
+          rule.selector,
+        );
+      if (match) {
+        const oldName = match[1] ?? match[2] ?? match[3] ?? "";
+        const equals = match[0].indexOf("=");
+        const rawValue = match[0].slice(equals + 1).trimStart();
+        const valueOffset =
+          match[0].length - match[0].slice(equals + 1).trimStart().length;
+        const quoted = rawValue.startsWith('"') || rawValue.startsWith("'");
+        const start =
+          rule.selectorSpan.start +
+          match.index +
+          valueOffset +
+          (quoted ? 1 : 0);
+        edits.push({
+          file: "tokens.css",
+          start,
+          end: start + oldName.length,
+          text: quoted ? newName : JSON.stringify(newName),
+        });
+      } else {
+        edits.push({
+          file: "tokens.css",
+          start: rule.selectorSpan.end,
+          end: rule.selectorSpan.end,
+          text: `, [data-mode="${newName}"]`,
+        });
+      }
+    }
+    return edits;
+  }
+
+  deleteTokenMode(name: string): TextEdit[] {
+    const mode = this.tokenTable().modes.find((item) => item.name === name);
+    if (!mode) throw new Error(`Unknown token mode: ${name}`);
+    if (mode.isDefault) throw new Error("Cannot delete the default token mode");
+    const code = this.textOf("tokens.css");
+    const spans = mode.rules
+      .map((rule) => {
+        let start = rule.ruleSpan.start;
+        let end = rule.ruleSpan.end;
+        while (start > 0 && /\s/.test(code[start - 1] ?? "")) start--;
+        while (end < code.length && /\s/.test(code[end] ?? "")) end++;
+        return { start, end };
+      })
+      .sort((a, b) => a.start - b.start);
+    const merged: Span[] = [];
+    for (const span of spans) {
+      const last = merged.at(-1);
+      if (last && span.start <= last.end)
+        last.end = Math.max(last.end, span.end);
+      else merged.push(span);
+    }
+    return [
+      ...this.modeReferences(name, null),
+      ...merged.map((span) => ({
+        file: "tokens.css",
+        ...span,
+        text: span.start > 0 ? "\n" : "",
+      })),
+    ];
   }
 
   createComponent(target: NodeRef, name: string): TextEdit[] {
@@ -1223,6 +1422,7 @@ class Planner {
       "Text",
       "Group",
       "Image",
+      "Path",
     ];
     const needed = primitives.filter((p) => {
       const reTag = new RegExp(`<${p}\\b`);
@@ -1271,6 +1471,191 @@ class Planner {
 
     return edits;
   }
+  createVariantSet(
+    targets: NodeRef[],
+    name: string,
+    axes: VariantAxis[],
+  ): TextEdit[] {
+    if (targets.length < 2) {
+      throw new Error("createVariantSet requires at least 2 targets");
+    }
+    const elements = targets.map((t) => this.anchor(t));
+    const first = elements[0];
+    if (!first) {
+      throw new Error("createVariantSet requires at least 2 targets");
+    }
+    const callerFile = first.ref.file;
+    const code = this.textOf(callerFile);
+    const componentFile = `components/${name}.tsx`;
+
+    // 1. Generate cartesian product combinations of axis values
+    const allCombos: Array<Record<string, string>> = [{}];
+    for (const axis of axes) {
+      const next: Array<Record<string, string>> = [];
+      for (const item of allCombos) {
+        for (const val of axis.values) {
+          next.push({ ...item, [axis.name]: val });
+        }
+      }
+      allCombos.length = 0;
+      allCombos.push(...next);
+    }
+    const defaultCombo: Record<string, string> = allCombos[0] ?? {};
+
+    // 2. Assign each target to a variant combo
+    const targetCombos: Array<Record<string, string>> = [];
+    const usedCombos = new Set<number>();
+
+    for (let i = 0; i < elements.length; i++) {
+      const el = elements[i];
+      if (!el) continue;
+      const elName = (
+        el.dataAttrs["data-name"] ??
+        (typeof el.attrs.name?.value === "string" ? el.attrs.name.value : "")
+      ).toLowerCase();
+
+      let matchedIndex = -1;
+      for (let c = 0; c < allCombos.length; c++) {
+        if (usedCombos.has(c)) continue;
+        const combo = allCombos[c];
+        if (!combo) continue;
+        const allMatch = Object.entries(combo).every(([axisName, axisVal]) => {
+          const valLower = axisVal.toLowerCase();
+          const axisLower = axisName.toLowerCase();
+          return (
+            elName.includes(`${axisLower}=${valLower}`) ||
+            elName.includes(valLower) ||
+            el.attrs[axisName]?.value === axisVal
+          );
+        });
+        if (allMatch) {
+          matchedIndex = c;
+          break;
+        }
+      }
+
+      if (matchedIndex === -1) {
+        for (let c = 0; c < allCombos.length; c++) {
+          if (!usedCombos.has(c)) {
+            matchedIndex = c;
+            break;
+          }
+        }
+      }
+
+      if (matchedIndex !== -1) {
+        usedCombos.add(matchedIndex);
+        targetCombos.push(allCombos[matchedIndex] ?? defaultCombo);
+      } else {
+        targetCombos.push(allCombos[i % allCombos.length] ?? defaultCombo);
+      }
+    }
+
+    // 3. Extract raw JSX of all targets
+    const rawJsxs = elements.map((el) =>
+      code.slice(el.ref.start, el.ref.end).trim(),
+    );
+
+    // 4. Primitives from @ombrique/runtime
+    const primitives = [
+      "Frame",
+      "Rect",
+      "Ellipse",
+      "Star",
+      "Text",
+      "Group",
+      "Image",
+      "Path",
+    ];
+    const needed = primitives.filter((p) => {
+      const reTag = new RegExp(`<${p}\\b`);
+      return rawJsxs.some((jsx) => reTag.test(jsx));
+    });
+    const importStmt =
+      needed.length > 0
+        ? `import { ${needed.join(", ")} } from "@ombrique/runtime";\n\n`
+        : "";
+
+    // 5. Props interface
+    const propFields = axes
+      .map(
+        (axis) =>
+          `  ${axis.name}?: ${axis.values.map((v) => JSON.stringify(v)).join(" | ")};`,
+      )
+      .join("\n");
+    const propsInterface = `export interface ${name}Props {\n${propFields}\n}\n\n`;
+
+    // 6. Variant axes metadata export
+    const axesExport = `export const variantAxes = ${JSON.stringify(axes, null, 2)};\n\n`;
+
+    // 7. Default parameters
+    const defaultParams = axes
+      .map((axis) => {
+        const def =
+          axis.values.find((v) => v === "default" || v === "medium") ??
+          axis.values[0];
+        return `${axis.name} = ${JSON.stringify(def)}`;
+      })
+      .join(", ");
+
+    // 8. Generate function branches
+    const baseIndex = 0;
+    const branches: string[] = [];
+    for (let j = 0; j < elements.length; j++) {
+      if (j === baseIndex) continue;
+      const combo = targetCombos[j] ?? defaultCombo;
+      const conditions = Object.entries(combo)
+        .map(([k, v]) => `${k} === ${JSON.stringify(v)}`)
+        .join(" && ");
+      branches.push(
+        `  if (${conditions}) {\n    return (\n      ${rawJsxs[j]}\n    );\n  }`,
+      );
+    }
+    const baseBranch = `  return (\n    ${rawJsxs[baseIndex]}\n  );`;
+
+    const componentContent = `${importStmt}${propsInterface}${axesExport}export function ${name}({\n  ${defaultParams},\n}: ${name}Props) {\n${branches.length > 0 ? `${branches.join("\n\n")}\n\n` : ""}${baseBranch}\n}\n`;
+
+    // 9. Edits
+    const edits: TextEdit[] = [
+      {
+        file: componentFile,
+        start: 0,
+        end: 0,
+        text: componentContent,
+      },
+    ];
+
+    const importPath = callerFile.startsWith("pages/")
+      ? `../components/${name}`
+      : `./${name}`;
+    const importLine = `import { ${name} } from "${importPath}";\n`;
+    if (!code.includes(importLine) && !code.includes(`import { ${name} }`)) {
+      edits.push({
+        file: callerFile,
+        start: 0,
+        end: 0,
+        text: importLine,
+      });
+    }
+
+    for (let i = 0; i < elements.length; i++) {
+      const el = elements[i];
+      if (!el) continue;
+      const combo = targetCombos[i] ?? defaultCombo;
+      const propEntries = Object.entries(combo).map(
+        ([k, v]) => `${k}=${JSON.stringify(v)}`,
+      );
+      const propStr = propEntries.length > 0 ? ` ${propEntries.join(" ")}` : "";
+      edits.push({
+        file: callerFile,
+        start: el.ref.start,
+        end: el.ref.end,
+        text: `<${name}${propStr} />`,
+      });
+    }
+
+    return edits;
+  }
 
   detachInstance(target: NodeRef): TextEdit[] {
     const el = this.anchor(target);
@@ -1284,12 +1669,41 @@ class Planner {
       throw new Error(`cannot find component definition for ${componentName}`);
     }
 
-    // Extract JSX inside return (...) of the component
-    const returnMatch = compCode.match(/return\s*\(\s*([\s\S]*?)\s*\);?\s*\}/);
-    if (!returnMatch?.[1]) {
+    let inlinedJsx: string | null = null;
+    const branches = [
+      ...compCode.matchAll(
+        /if\s*\(([^)]+)\)\s*\{\s*return\s*\(\s*([\s\S]*?)\s*\);?\s*\}/g,
+      ),
+    ];
+    for (const b of branches) {
+      const cond = b[1];
+      const jsx = b[2]?.trim();
+      if (!cond || !jsx) continue;
+      const parts = cond.split("&&").map((s) => s.trim());
+      const allMatch = parts.every((part) => {
+        const m = part.match(/([a-zA-Z0-9_$]+)\s*===\s*"([^"]+)"/);
+        if (!m?.[1] || !m[2]) return false;
+        const axisName = m[1];
+        const axisVal = m[2];
+        return el.attrs[axisName]?.value === axisVal;
+      });
+      if (allMatch) {
+        inlinedJsx = jsx;
+        break;
+      }
+    }
+    if (!inlinedJsx) {
+      const returnMatches = [
+        ...compCode.matchAll(/return\s*\(\s*([\s\S]*?)\s*\);?\s*\}/g),
+      ];
+      if (returnMatches.length > 0) {
+        const last = returnMatches[returnMatches.length - 1];
+        if (last?.[1]) inlinedJsx = last[1].trim();
+      }
+    }
+    if (!inlinedJsx) {
       throw new Error(`could not extract JSX from ${compFile}`);
     }
-    let inlinedJsx = returnMatch[1].trim();
 
     // Apply any override props present on the instance el.attrs
     // For each attr on instance (excluding className/style/data-), inject/override it on root element of inlinedJsx
@@ -1339,6 +1753,7 @@ class Planner {
       "Image",
       "Vector",
       "Boolean",
+      "Path",
     ]);
     const usedPrimitives: string[] = [];
     for (const tagMatch of inlinedJsx.matchAll(/<([A-Z][A-Za-z0-9]*)/g)) {
@@ -1612,13 +2027,33 @@ export function planPatch(
         );
         break;
       case "setTokenValue":
-        edits = planner.setTokenValue(command.name, command.value);
+        edits = planner.setTokenValue(
+          command.name,
+          command.value,
+          command.mode,
+        );
         break;
       case "createToken":
         edits = planner.createToken(command.name, command.value);
         break;
+      case "addTokenMode":
+        edits = planner.addTokenMode(command.name);
+        break;
+      case "renameTokenMode":
+        edits = planner.renameTokenMode(command.name, command.newName);
+        break;
+      case "deleteTokenMode":
+        edits = planner.deleteTokenMode(command.name);
+        break;
       case "createComponent":
         edits = planner.createComponent(command.target, command.name);
+        break;
+      case "createVariantSet":
+        edits = planner.createVariantSet(
+          command.targets,
+          command.name,
+          command.axes,
+        );
         break;
       case "detachInstance":
         edits = planner.detachInstance(command.target);

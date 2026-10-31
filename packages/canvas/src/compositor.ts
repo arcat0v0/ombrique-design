@@ -117,6 +117,8 @@ interface Board {
   h: number;
   ubo: GPUBuffer;
   baseTex: GPUTexture;
+  baseTexW: number;
+  baseTexH: number;
   baseBind: GPUBindGroup;
   tex: GPUTexture;
   texW: number;
@@ -189,10 +191,10 @@ export async function createCompositor(
   let byEl = new Map<Element, Board>();
   let cam: Camera = { x: 0, y: 0, z: 1 };
   let destroyed = false;
+  let frameNo = 0;
   let rafId = 0;
   let lastT = 0;
   let fpsEma = 0;
-  let frameNo = 0;
   let geometryApiOk = true;
   let uploadsTotal = 0;
   let paintsTotal = 0;
@@ -201,7 +203,6 @@ export async function createCompositor(
   const minZoom = opts.minZoom ?? 0.05;
   const maxZoom = opts.maxZoom ?? 32;
   const clearColor = opts.clearColor ?? { r: 0.063, g: 0.063, b: 0.078, a: 1 };
-
   async function detectUploadFormat(): Promise<GPUTextureFormat> {
     const probe = document.createElement("canvas");
     probe.width = 8;
@@ -278,6 +279,17 @@ export async function createCompositor(
     });
   }
 
+  function restoreBase(b: Board): void {
+    if (!b.hiRes) return;
+    b.hiRes.tex.destroy();
+    hiResBytes -= b.hiRes.bytes;
+    b.hiRes = null;
+    b.tex = b.baseTex;
+    b.texW = b.baseTexW;
+    b.texH = b.baseTexH;
+    b.bind = b.baseBind;
+  }
+
   function disposeBoardResources(): void {
     for (const b of boards) {
       b.baseTex.destroy();
@@ -291,24 +303,12 @@ export async function createCompositor(
     boards = [];
     byEl = new Map();
   }
-
-  function restoreBase(b: Board): void {
-    if (!b.hiRes) return;
-    b.hiRes.tex.destroy();
-    hiResBytes -= b.hiRes.bytes;
-    b.hiRes = null;
-    b.tex = b.baseTex;
-    b.texW = b.w;
-    b.texH = b.h;
-    b.bind = b.baseBind;
-  }
-
   function setBoards(inits: BoardInit[]): void {
     disposeBoardResources();
     const maxDim = device.limits.maxTextureDimension2D;
     for (const init of inits) {
-      const texW = Math.min(Math.max(1, Math.round(init.worldW)), maxDim);
-      const texH = Math.min(Math.max(1, Math.round(init.worldH)), maxDim);
+      const texW = Math.min(Math.max(1, Math.round(init.worldW * dpr)), maxDim);
+      const texH = Math.min(Math.max(1, Math.round(init.worldH * dpr)), maxDim);
       const tex = createBoardTexture(texW, texH);
       const ubo = device.createBuffer({
         size: 16,
@@ -327,6 +327,8 @@ export async function createCompositor(
         h: init.worldH,
         ubo,
         baseTex: tex,
+        baseTexW: texW,
+        baseTexH: texH,
         baseBind: null as unknown as GPUBindGroup,
         tex,
         texW,
@@ -339,6 +341,10 @@ export async function createCompositor(
       boards.push(board);
       byEl.set(init.el, board);
     }
+    for (const b of boards) {
+      queue.markDirty(b.el);
+    }
+    canvas.requestPaint();
   }
 
   function uploadEl(el: Element): void {
@@ -472,9 +478,18 @@ export async function createCompositor(
   function uploadAtScale(el: Element, scale: number): boolean {
     const b = byEl.get(el);
     if (!b || destroyed || el.parentElement !== canvas) return false;
+    if (!uploadElementImage.canResample) return false;
     const maxDim = device.limits.maxTextureDimension2D;
     const texW = Math.min(Math.max(1, Math.round(b.w * scale)), maxDim);
     const texH = Math.min(Math.max(1, Math.round(b.h * scale)), maxDim);
+    if (scale <= 1 || (texW <= b.baseTexW && texH <= b.baseTexH)) {
+      if (b.hiRes) restoreBase(b);
+      return true;
+    }
+    if (b.hiRes && b.hiRes.texW === texW && b.hiRes.texH === texH) {
+      b.hiRes.lastUsed = frameNo;
+      return true;
+    }
     const bytes = texW * texH * 4;
     if (b.hiRes) restoreBase(b);
     const tex = createBoardTexture(texW, texH);
@@ -512,7 +527,6 @@ export async function createCompositor(
     }
     return true;
   }
-
   async function exportBoard(
     el: Element,
     scale: number,

@@ -110,11 +110,23 @@ export function reanchorCommand(
     command.kind === "deletePage" ||
     command.kind === "setSharedStyle" ||
     command.kind === "setTokenValue" ||
-    command.kind === "createToken"
+    command.kind === "createToken" ||
+    command.kind === "addTokenMode" ||
+    command.kind === "renameTokenMode" ||
+    command.kind === "deleteTokenMode"
   ) {
     return command;
   }
   if (command.kind === "deleteNodes") {
+    const targets: NodeRef[] = [];
+    for (const target of command.targets) {
+      const anchored = anchor(target);
+      if (!anchored) return null;
+      targets.push(anchored);
+    }
+    return { ...command, targets };
+  }
+  if (command.kind === "createVariantSet") {
     const targets: NodeRef[] = [];
     for (const target of command.targets) {
       const anchored = anchor(target);

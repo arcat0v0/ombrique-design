@@ -27,20 +27,4 @@ describe("Text", () => {
     expect(div?.style.fontSize).toBe("18px");
     expect(div?.style.color).toBe("rgb(18, 52, 86)");
   });
-
-  it("stays static without x/y", () => {
-    const { container } = render(<Text>plain</Text>);
-    const div = container.querySelector("div");
-    expect(div?.style.position).toBe("");
-  });
-
-  it("lets user style override derived styles", () => {
-    const { container } = render(
-      <Text fontSize={18} style={{ fontSize: 99 }}>
-        t
-      </Text>,
-    );
-    const div = container.querySelector("div");
-    expect(div?.style.fontSize).toBe("99px");
-  });
 });

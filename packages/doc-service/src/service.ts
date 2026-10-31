@@ -158,6 +158,13 @@ export class DocumentService {
     if (!entry) return null;
     return this.restore(entry.after, entry.files);
   }
+  get canUndo(): boolean {
+    return this.history.canUndo;
+  }
+
+  get canRedo(): boolean {
+    return this.history.canRedo;
+  }
 
   private restore(
     texts: Map<string, string>,
@@ -165,15 +172,20 @@ export class DocumentService {
   ): AppliedTransaction {
     const snapshot = this.project;
     for (const [file, text] of texts) {
-      writeFileAtomic(resolveInside(snapshot.root, file), text);
-      this.selfWrites.set(file, hashText(text));
-      snapshot.files.set(file, { text, version: hashText(text) });
+      if (text === "") {
+        removeFile(resolveInside(snapshot.root, file));
+        snapshot.files.delete(file);
+        this.selfWrites.delete(file);
+      } else {
+        writeFileAtomic(resolveInside(snapshot.root, file), text);
+        this.selfWrites.set(file, hashText(text));
+        snapshot.files.set(file, { text, version: hashText(text) });
+      }
     }
     const manifestText = texts.get(MANIFEST_NAME);
     if (manifestText)
       snapshot.manifest = manifestSchema.parse(JSON.parse(manifestText));
     rebuildIndex(snapshot);
-    this.counter += 1;
     const transaction: AppliedTransaction = {
       id: `t${this.counter}`,
       changedFiles: files,
@@ -185,6 +197,46 @@ export class DocumentService {
     this.emitManifest();
     this.emitDiagnostics();
     return transaction;
+  }
+
+  restoreVersion(
+    targetFiles: Record<string, string>,
+  ): AppliedTransaction | null {
+    const snapshot = this.project;
+    const before = new Map<string, string>();
+    const after = new Map<string, string>();
+    const touched: string[] = [];
+
+    const currentFileKeys = new Set(snapshot.files.keys());
+    const targetFileKeys = new Set(Object.keys(targetFiles));
+    const allFiles = new Set([...currentFileKeys, ...targetFileKeys]);
+
+    for (const file of allFiles) {
+      if (file === "comments.json") continue;
+      const prev = snapshot.files.get(file)?.text ?? "";
+      const next = targetFiles[file];
+
+      if (next === undefined) {
+        if (currentFileKeys.has(file)) {
+          before.set(file, prev);
+          after.set(file, "");
+          touched.push(file);
+        }
+      } else if (!currentFileKeys.has(file)) {
+        before.set(file, "");
+        after.set(file, next);
+        touched.push(file);
+      } else if (prev !== next) {
+        before.set(file, prev);
+        after.set(file, next);
+        touched.push(file);
+      }
+    }
+
+    if (touched.length === 0) return null;
+
+    this.history.record({ before, after, files: touched });
+    return this.restore(after, touched);
   }
 
   private filesFor(
@@ -206,8 +258,30 @@ export class DocumentService {
         files.add("tokens.css");
         continue;
       }
+      if (
+        command.kind === "addTokenMode" ||
+        command.kind === "renameTokenMode" ||
+        command.kind === "deleteTokenMode"
+      ) {
+        files.add("tokens.css");
+        if (command.kind !== "addTokenMode") {
+          for (const element of snapshot.index.elements.values()) {
+            if (
+              element.tag === "Frame" &&
+              element.attrs.mode?.value === command.name
+            )
+              files.add(element.ref.file);
+          }
+        }
+        continue;
+      }
       if (command.kind === "createComponent") {
         files.add(command.target.file);
+        files.add(`components/${command.name}.tsx`);
+        continue;
+      }
+      if (command.kind === "createVariantSet") {
+        for (const target of command.targets) files.add(target.file);
         files.add(`components/${command.name}.tsx`);
         continue;
       }

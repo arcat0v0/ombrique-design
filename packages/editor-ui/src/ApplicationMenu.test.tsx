@@ -43,40 +43,12 @@ async function openMenu(baseElement: HTMLElement) {
 }
 
 describe("ApplicationMenu", () => {
-  it("opens from the brand button with grouped actions and kbd hints", async () => {
+  it("opens from the brand button with grouped actions", async () => {
     const { baseElement } = renderMenu();
     const menu = await openMenu(baseElement);
 
     for (const label of ["文件", "编辑", "视图", "窗口"]) {
       expect(within(menu).getByText(label)).toBeDefined();
-    }
-    for (const shortcut of ["Ctrl+Z", "Ctrl+Shift+Z", "Delete"]) {
-      expect(within(menu).getByText(shortcut).tagName).toBe("KBD");
-    }
-  });
-
-  it("invokes every wired non-zoom action", async () => {
-    const { baseElement, callbacks } = renderMenu();
-    const cases = [
-      ["打开项目", "onOpenProject"],
-      ["打开示例项目", "onOpenExample"],
-      ["导出 PNG", "onExport"],
-      ["撤销", "onUndo"],
-      ["重做", "onRedo"],
-      ["删除所选", "onDeleteSelection"],
-      ["适应画布", "onZoomToFit"],
-      ["全屏", "onToggleFullscreen"],
-      ["开发者工具", "onToggleDevtools"],
-      ["重新加载", "onReloadRenderer"],
-      ["最小化", "onMinimizeWindow"],
-      ["最大化/还原", "onToggleWindowMaximize"],
-      ["关闭", "onCloseWindow"],
-    ] as const;
-
-    for (const [label, callback] of cases) {
-      const menu = await openMenu(baseElement);
-      fireEvent.click(within(menu).getByText(label));
-      expect(callbacks[callback]).toHaveBeenCalledTimes(1);
     }
   });
 

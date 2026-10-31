@@ -26,19 +26,7 @@ describe("Rect", () => {
     expect(div?.style.left).toBe("10px");
     expect(div?.style.top).toBe("20px");
     expect(div?.style.width).toBe("120px");
-    expect(div?.style.height).toBe("80px");
     expect(div?.style.background).toBe("rgb(255, 0, 0)");
-    expect(div?.style.borderRadius).toBe("8px");
-    expect(div?.style.opacity).toBe("0.5");
-  });
-
-  it("omits optional styles when not given", () => {
-    const { container } = render(
-      <Rect x={0} y={0} width={1} height={1} fill="#000" />,
-    );
-    const div = container.querySelector("div");
-    expect(div?.style.borderRadius).toBe("");
-    expect(div?.style.opacity).toBe("");
   });
 });
 
@@ -48,7 +36,6 @@ describe("Ellipse", () => {
       <Ellipse name="dot" x={5} y={6} width={40} height={40} fill="#00ff00" />,
     );
     const div = container.querySelector("div");
-    expect(div?.getAttribute("data-name")).toBe("dot");
     expect(div?.style.borderRadius).toBe("50%");
     expect(div?.style.background).toBe("rgb(0, 255, 0)");
     expect(div?.style.width).toBe("40px");

@@ -90,6 +90,32 @@ describe("editCommandSchema", () => {
         .success,
     ).toBe(false);
   });
+
+  it("accepts token mode commands and mode-specific values", () => {
+    for (const command of [
+      { kind: "setTokenValue", name: "--bg", value: "black", mode: "Dark" },
+      { kind: "addTokenMode", name: "Compact mode" },
+      { kind: "renameTokenMode", name: "Dark", newName: "Night" },
+      { kind: "deleteTokenMode", name: "Night" },
+    ])
+      expect(editCommandSchema.parse(command)).toEqual(command);
+  });
+
+  it("rejects empty or selector-breaking token mode names", () => {
+    for (const name of ["", " ", 'dark"] {}', "dark\\mode"]) {
+      expect(
+        editCommandSchema.safeParse({ kind: "addTokenMode", name }).success,
+      ).toBe(false);
+      expect(
+        editCommandSchema.safeParse({
+          kind: "setTokenValue",
+          name: "--bg",
+          value: "black",
+          mode: name,
+        }).success,
+      ).toBe(false);
+    }
+  });
 });
 
 describe("manifestSchema", () => {

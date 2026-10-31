@@ -15,3 +15,30 @@ export type {
   CompositorOptions,
   CompositorStats,
 } from "./compositor";
+export {
+  addPointToPath,
+  deleteAnchorPoint,
+  getAnchorPoints,
+  getControlHandles,
+  moveAnchorPoint,
+  moveControlHandle,
+  parseSVGPath,
+  serializePath,
+} from "./path-utils";
+export type { Handle, PathSegment, Point } from "./path-utils";
+export {
+  collectEqualGaps,
+  measureBetweenRects,
+  snapRectToGuides,
+} from "./guides";
+export type {
+  DistanceMeasurement,
+  EqualSpacingGuide,
+  GuideAxis,
+  GuideFeature,
+  GuideRect,
+  ReferenceLine,
+  SmartGuideLine,
+  SnapOptions,
+  SnapResult,
+} from "./guides";

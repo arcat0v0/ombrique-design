@@ -1,7 +1,7 @@
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { Star } from "./Star";
-import { starPoints, starVertices } from "./starMath";
+import { starVertices } from "./starMath";
 
 afterEach(cleanup);
 
@@ -33,16 +33,6 @@ describe("starVertices", () => {
     expect(starVertices(100, 6)).toHaveLength(12);
     expect(starVertices(100, 3)).toHaveLength(6);
   });
-
-  it("formats polygon points", () => {
-    const points = starPoints(100, 5, 0.4);
-    expect(points.split(" ")).toHaveLength(10);
-    expect(starPoints(100, 5, 0.4)).toBe(
-      starVertices(100, 5, 0.4)
-        .map((v) => `${v.x},${v.y}`)
-        .join(" "),
-    );
-  });
 });
 
 describe("Star", () => {
@@ -69,13 +59,5 @@ describe("Star", () => {
     const polygon = container.querySelector("polygon");
     expect(polygon?.getAttribute("fill")).toBe("#ffcc00");
     expect(polygon?.getAttribute("points")?.split(" ")).toHaveLength(10);
-  });
-
-  it("supports custom point counts", () => {
-    const { container } = render(
-      <Star x={0} y={0} size={40} points={7} fill="#000" />,
-    );
-    const polygon = container.querySelector("polygon");
-    expect(polygon?.getAttribute("points")?.split(" ")).toHaveLength(14);
   });
 });

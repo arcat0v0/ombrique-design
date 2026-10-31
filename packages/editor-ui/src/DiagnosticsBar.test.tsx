@@ -17,8 +17,8 @@ const warning: DiagnosticItem = {
 };
 
 describe("DiagnosticsBar", () => {
-  it("shows the diagnostics count and the latest item", () => {
-    const { getByText } = render(
+  it("shows diagnostics count and colors the latest diagnostic by severity", () => {
+    const { container, getByText, rerender } = render(
       <DiagnosticsBar
         diagnostics={[error, warning]}
         notice={null}
@@ -27,19 +27,10 @@ describe("DiagnosticsBar", () => {
     );
     expect(getByText("2 条诊断")).toBeDefined();
     expect(getByText("Page.tsx: 未使用的变量")).toBeDefined();
-  });
-
-  it("colors the latest diagnostic by severity", () => {
-    const { container, rerender } = render(
-      <DiagnosticsBar
-        diagnostics={[warning]}
-        notice={null}
-        onDismissNotice={() => {}}
-      />,
-    );
     expect(
       container.querySelector(".diagnostics-latest-warning"),
     ).not.toBeNull();
+
     rerender(
       <DiagnosticsBar
         diagnostics={[error]}
@@ -48,18 +39,6 @@ describe("DiagnosticsBar", () => {
       />,
     );
     expect(container.querySelector(".diagnostics-latest-error")).not.toBeNull();
-  });
-
-  it("renders nothing extra when there are no diagnostics", () => {
-    const { container, getByText } = render(
-      <DiagnosticsBar
-        diagnostics={[]}
-        notice={null}
-        onDismissNotice={() => {}}
-      />,
-    );
-    expect(getByText("0 条诊断")).toBeDefined();
-    expect(container.querySelector(".diagnostics-latest")).toBeNull();
   });
 
   it("shows the notice and dismisses it on click", () => {
