@@ -1,3 +1,9 @@
+interface ElementImage {
+  readonly width: number;
+  readonly height: number;
+  close?(): void;
+}
+
 interface HTMLCanvasElement {
   content: string;
   requestPaint(): void;
@@ -5,6 +11,7 @@ interface HTMLCanvasElement {
     element: Element,
     geometry: { canvasTransform?: DOMMatrix },
   ): void;
+  captureElementImage?(element: Element): ElementImage;
 }
 
 interface HTMLElementEventMap {
@@ -17,14 +24,14 @@ interface PaintEvent extends Event {
 
 interface GPUQueue {
   copyElementImageToTexture?(
-    source: { source: Element },
+    source: { source: Element | ElementImage },
     destination: {
       destination: { texture: GPUTexture };
       size?: { width: number; height: number };
     },
   ): void;
   drawElementImageToTexture?(
-    source: { source: Element },
+    source: { source: Element | ElementImage },
     destination: {
       texture: GPUTexture;
       size: { width: number; height: number };

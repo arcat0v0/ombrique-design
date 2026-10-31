@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   HandIcon,
   MousePointer2Icon,
@@ -85,6 +86,11 @@ const activeToolStyle = {
   color: "var(--primary-foreground, #141414)",
 } as const;
 
+const hoverToolStyle = {
+  ...toolStyle,
+  background: "rgba(255, 255, 255, 0.12)",
+} as const;
+
 const iconStyle = { width: 16, height: 16 } as const;
 
 const tooltipStyle = {
@@ -92,6 +98,20 @@ const tooltipStyle = {
   alignItems: "center",
   gap: 6,
   fontSize: 12,
+} as const;
+
+const tooltipContentStyle = {
+  zIndex: 45,
+  padding: "5px 9px",
+  borderRadius: 6,
+  border: "1px solid rgba(255, 255, 255, 0.12)",
+  background: "#1f1f24",
+  color: "#f5f5f5",
+  boxShadow: "0 6px 20px rgba(0, 0, 0, 0.4)",
+  fontFamily:
+    '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+  whiteSpace: "nowrap",
+  pointerEvents: "none",
 } as const;
 
 const kbdStyle = {
@@ -103,6 +123,7 @@ export function FloatingToolSwitcher({
   activeTool,
   onSelectTool,
 }: FloatingToolSwitcherProps) {
+  const [hoveredTool, setHoveredTool] = useState<CanvasTool | null>(null);
   return (
     <TooltipProvider delayDuration={200}>
       <ToggleGroup
@@ -116,20 +137,35 @@ export function FloatingToolSwitcher({
       >
         {tools.map((tool) => {
           const Icon = tool.icon;
+          const isActive = activeTool === tool.value;
           return (
             <Tooltip key={tool.value}>
               <TooltipTrigger asChild>
                 <ToggleGroupItem
                   value={tool.value}
                   aria-label={tool.label}
+                  onPointerEnter={() => setHoveredTool(tool.value)}
+                  onPointerLeave={() =>
+                    setHoveredTool((current) =>
+                      current === tool.value ? null : current,
+                    )
+                  }
                   style={
-                    activeTool === tool.value ? activeToolStyle : toolStyle
+                    isActive
+                      ? activeToolStyle
+                      : hoveredTool === tool.value
+                        ? hoverToolStyle
+                        : toolStyle
                   }
                 >
                   <Icon style={iconStyle} />
                 </ToggleGroupItem>
               </TooltipTrigger>
-              <TooltipContent side="top">
+              <TooltipContent
+                side="top"
+                sideOffset={6}
+                style={tooltipContentStyle}
+              >
                 <span style={tooltipStyle}>
                   {tool.label}
                   <Kbd style={kbdStyle}>{tool.shortcut}</Kbd>
