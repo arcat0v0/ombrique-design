@@ -1,4 +1,7 @@
-import { DocumentService } from "@ombrique/doc-service";
+import {
+  DocumentService,
+  TransactionRejectedError,
+} from "@ombrique/doc-service";
 import {
   extractVariantAxes,
   locateByPath,
@@ -338,10 +341,12 @@ port.on("message", async (event) => {
     try {
       await handle(parsed.data);
     } catch (error) {
-      emit({
-        kind: "commandFailed",
-        message: error instanceof Error ? error.message : String(error),
-      });
+      if (!(error instanceof TransactionRejectedError)) {
+        emit({
+          kind: "commandFailed",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
   }
 });

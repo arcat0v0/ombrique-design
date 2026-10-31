@@ -20,6 +20,9 @@ contextBridge.exposeInMainWorld("ombriqueCanvas", {
   onSelection: (cb: (payload: unknown) => void) => {
     ipcRenderer.on("ombrique:selection", (_event, payload) => cb(payload));
   },
+  onCommandFailed: (cb: (payload: unknown) => void) => {
+    ipcRenderer.on("ombrique:commandFailed", (_event, payload) => cb(payload));
+  },
   onPage: (cb: (pageId: string) => void) => {
     ipcRenderer.on("ombrique:page", (_event, pageId) => cb(String(pageId)));
   },

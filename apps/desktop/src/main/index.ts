@@ -258,6 +258,10 @@ function wireDocHost(host: DocHost) {
       return;
     }
     if (type === "doc") {
+      const doc = message.message as { kind?: string } | null | undefined;
+      if (doc?.kind === "commandFailed") {
+        canvasView?.webContents.send("ombrique:commandFailed", doc);
+      }
       shellWindow?.webContents.send("ombrique:doc", message.message);
       return;
     }

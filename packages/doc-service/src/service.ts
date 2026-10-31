@@ -6,6 +6,13 @@ import type {
   Manifest,
 } from "@ombrique/protocol";
 import { manifestSchema } from "@ombrique/protocol";
+
+export class TransactionRejectedError extends Error {
+  constructor() {
+    super("transaction rejected");
+    this.name = "TransactionRejectedError";
+  }
+}
 import { readFileSync, watch, type FSWatcher } from "node:fs";
 import { History } from "./history";
 import {
@@ -91,7 +98,7 @@ export class DocumentService {
         kind: "commandFailed",
         message: "节点已不存在或代码已被改动,请重新选择后再操作",
       });
-      throw new Error("command could not be applied to the current sources");
+      throw new TransactionRejectedError();
     }
 
     const before = new Map<string, string>();

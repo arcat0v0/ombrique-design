@@ -501,16 +501,31 @@ export function createShellState() {
     });
   }
 
+  let editQueue: Promise<void> = Promise.resolve();
+
   async function sendCommands(commands: unknown[]) {
-    if (!bridge) return;
-    set({ busy: true });
-    const versions = await bridge.versions();
-    await bridge.send({
-      kind: "applyCommands",
-      commands,
-      baseVersions: Object.values(versions),
-    });
-    set({ busy: false });
+    const run = async () => {
+      if (!bridge) return;
+      set({ busy: true });
+      const versions = await bridge.versions();
+      try {
+        await bridge.send({
+          kind: "applyCommands",
+          commands,
+          baseVersions: Object.values(versions),
+        });
+      } catch (error) {
+        set({
+          notice: error instanceof Error ? error.message : String(error),
+          busy: false,
+        });
+        return;
+      }
+      set({ busy: false });
+    };
+    const queued = editQueue.then(run, run);
+    editQueue = queued.catch(() => {});
+    await queued;
   }
 
   async function applyTokenMode(command: {

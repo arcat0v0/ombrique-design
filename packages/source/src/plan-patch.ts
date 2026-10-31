@@ -736,6 +736,7 @@ class Planner {
     const el = this.anchor(target);
     const code = this.textOf(el.ref.file);
     const edits: TextEdit[] = [];
+    let insertions: { pos: number; text: string } | null = null;
     for (const [name, value] of Object.entries(attrs)) {
       const existing = el.attrs[name];
       if (value === null || value === false) {
@@ -782,7 +783,19 @@ class Planner {
       const pos = insertAttrPos(code, el);
       if (code[pos - 1] === " " || code[pos - 1] === "\t")
         insertText = insertText.slice(1);
-      edits.push({ file: el.ref.file, start: pos, end: pos, text: insertText });
+      if (insertions === null) {
+        insertions = { pos, text: insertText };
+      } else {
+        insertions = { pos, text: `${insertions.text}${insertText}` };
+      }
+    }
+    if (insertions) {
+      edits.push({
+        file: el.ref.file,
+        start: insertions.pos,
+        end: insertions.pos,
+        text: insertions.text,
+      });
     }
     return edits;
   }

@@ -256,6 +256,114 @@ describe("createShellState style & token routing", () => {
       { kind: "deleteTokenMode", name: "Night" },
     ]);
   });
+  it("serializes sendCommands so version reads never interleave", async () => {
+    const events: string[] = [];
+    const sentCommands: SentCommand[] = [];
+    const gate = Promise.withResolvers<void>();
+    const resolved = Promise.withResolvers<void>();
+    const secondSend = Promise.withResolvers<void>();
+    let sends = 0;
+    const selectionChanged: { cb: ((payload: unknown) => void) | null } = {
+      cb: null,
+    };
+    installBridge({
+      versions: async () => {
+        events.push("versions");
+        await gate.promise;
+        return { "pages/home.tsx": "v1" };
+      },
+      send: async (message) => {
+        events.push("send");
+        sentCommands.push(message as SentCommand);
+        sends += 1;
+        if (sends >= 2) secondSend.resolve();
+        return true;
+      },
+      onProject: () => {},
+      onFiles: () => {},
+      onDoc: () => {},
+      onFatal: () => {},
+      onStats: () => {},
+      onSelectionChanged: (cb) => {
+        selectionChanged.cb = cb;
+      },
+      resolveNode: async () => {
+        resolved.resolve();
+        return {
+          ref: { file: "pages/home.tsx", start: 10, end: 40 },
+          path: [0, 1],
+          tag: "section",
+          kind: "frame",
+          generated: false,
+          name: "Hero",
+          hidden: false,
+          locked: false,
+          text: "",
+          style: [],
+          attrs: [],
+        };
+      },
+    });
+    const state = createShellState();
+    selectionChanged.cb?.({ file: "pages/home.tsx", path: [0, 1] });
+    await resolved.promise;
+    state.actions.setName("A");
+    state.actions.setName("B");
+    gate.resolve();
+    await secondSend.promise;
+    expect(events).toEqual(["versions", "send", "versions", "send"]);
+    expect(sentCommands).toHaveLength(2);
+  });
+  it("sets notice when the doc host rejects a transaction", async () => {
+    const resolved = Promise.withResolvers<void>();
+    const settled = Promise.withResolvers<void>();
+    const selectionChanged: { cb: ((payload: unknown) => void) | null } = {
+      cb: null,
+    };
+    installBridge({
+      versions: async () => ({ "pages/home.tsx": "v1" }),
+      send: async () => {
+        settled.resolve();
+        throw new Error("command could not be applied to the current sources");
+      },
+      onProject: () => {},
+      onFiles: () => {},
+      onDoc: () => {},
+      onFatal: () => {},
+      onStats: () => {},
+      onSelectionChanged: (cb) => {
+        selectionChanged.cb = cb;
+      },
+      resolveNode: async () => {
+        resolved.resolve();
+        return {
+          ref: { file: "pages/home.tsx", start: 10, end: 40 },
+          path: [0, 1],
+          tag: "section",
+          kind: "frame",
+          generated: false,
+          name: "Hero",
+          hidden: false,
+          locked: false,
+          text: "",
+          style: [],
+          attrs: [],
+        };
+      },
+    });
+    const state = createShellState();
+    selectionChanged.cb?.({ file: "pages/home.tsx", path: [0, 1] });
+    await resolved.promise;
+    state.actions.setName("A");
+    await settled.promise;
+    for (let ticks = 0; state.getView().busy && ticks < 100; ticks += 1) {
+      await queueMicrotask;
+    }
+    expect(state.getView().notice).toBe(
+      "command could not be applied to the current sources",
+    );
+    expect(state.getView().busy).toBe(false);
+  });
 });
 
 describe("toSummary component metadata", () => {

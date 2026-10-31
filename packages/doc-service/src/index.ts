@@ -1,4 +1,8 @@
-export { DocumentService, type DocumentServiceOptions } from "./service";
+export {
+  DocumentService,
+  TransactionRejectedError,
+  type DocumentServiceOptions,
+} from "./service";
 export { History, type HistoryEntry } from "./history";
 export {
   hashText,

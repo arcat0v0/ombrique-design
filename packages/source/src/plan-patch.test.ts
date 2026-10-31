@@ -278,6 +278,42 @@ describe("planPatch: setAttrs", () => {
       '<div data-name="Sub" />',
     );
   });
+  it("inserts several missing attributes in one edit without overlapping spans", () => {
+    const index = makeIndex();
+    const hero = byName(index, "pages/home.tsx", "Hero");
+    const inserted = patch(index, {
+      kind: "setAttrs",
+      target: hero.ref,
+      attrs: { x: 12, y: 34, height: 56 },
+    });
+    expect(inserted.next["pages/home.tsx"]).toContain(
+      "width: 400 }} x={12} y={34} height={56}>",
+    );
+    expect(
+      inserted.result.edits.filter((e) => e.file === "pages/home.tsx"),
+    ).toHaveLength(1);
+    untouched(
+      PAGE,
+      inserted.next["pages/home.tsx"] ?? "",
+      inserted.result.edits,
+    );
+  });
+
+  it("replaces an existing attribute and inserts new ones in one command", () => {
+    const index = makeIndex();
+    const hero = byName(index, "pages/home.tsx", "Hero");
+    const mixed = patch(index, {
+      kind: "setAttrs",
+      target: hero.ref,
+      attrs: { "data-name": "Hero2", x: 7, y: 9 },
+    });
+    expect(mixed.next["pages/home.tsx"]).toContain('data-name="Hero2"');
+    expect(mixed.next["pages/home.tsx"]).not.toContain('data-name="Hero"');
+    expect(mixed.next["pages/home.tsx"]).toContain(
+      "width: 400 }} x={7} y={9}>",
+    );
+    untouched(PAGE, mixed.next["pages/home.tsx"] ?? "", mixed.result.edits);
+  });
 });
 
 describe("planPatch: createNodes", () => {

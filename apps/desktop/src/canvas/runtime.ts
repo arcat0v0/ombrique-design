@@ -34,11 +34,13 @@ import {
   renderRulersOverlay,
   renderSmartGuidesOverlay,
 } from "./interactions";
+import { worldRectFromClientRect, type WorldRect } from "./selection-geometry";
 import { serializeNodeToSvg } from "./export-node";
 interface CanvasBridge {
   onProject: (cb: (payload: ProjectMessage) => void) => void;
   onFiles: (cb: (payload: unknown) => void) => void;
   onHmr: (cb: (payload: HmrPayload) => void) => void;
+  onCommandFailed: (cb: (payload: unknown) => void) => void;
   onViewCommand: (cb: (payload: unknown) => void) => void;
   onPage: (cb: (pageId: string) => void) => void;
   onManifest: (cb: (payload: unknown) => void) => void;
@@ -182,8 +184,19 @@ const drag: {
   activeReference?: ReferenceLine | null;
   activeLayoutHandle?: LayoutHandle | null;
   originValue?: number;
-  nodeOrigins?: Map<SelectedNode, { x: number; y: number }>;
-} = { mode: "none", x: 0, y: 0, moved: false, handle: null, originRect: null };
+  nodeOrigins?: Map<string, { x: number; y: number }>;
+  restores?: Array<() => void>;
+} = {
+  mode: "none",
+  x: 0,
+  y: 0,
+  moved: false,
+  handle: null,
+  originRect: null,
+  restores: undefined,
+};
+
+let pendingDragRestores: Array<() => void> | null = null;
 
 interface PointerMoveSnapshot {
   clientX: number;
@@ -288,6 +301,7 @@ function collectGuideTargets(): Array<{
   const selectedElements = new Set(multiSelection.map((s) => s.element));
   if (selection) selectedElements.add(selection.element);
   for (const [el] of nodeIndex) {
+    if (!el.isConnected) continue;
     if (selectedElements.has(el)) continue;
     if (
       el.tagName.toLowerCase() === "section" &&
@@ -313,7 +327,7 @@ function drawSmartGuides(
     yFeatures?: GuideFeature[];
   },
 ): SnapResult | null {
-  const currentRect = dragRect ?? (selection ? selection.rect : null);
+  const currentRect = dragRect ?? (selection ? syncNodeRect(selection) : null);
   if (!currentRect) return null;
 
   const targets = allTargets ?? collectGuideTargets();
@@ -366,6 +380,21 @@ function flagsOf(node: SelectedNode): {
 function isEditableNode(node: SelectedNode): boolean {
   const flags = flagsOf(node);
   return !flags.locked && !flags.generated;
+}
+
+function snapshotNodeDragRestore(node: SelectedNode): () => void {
+  const element = node.element as HTMLElement;
+  const rect = { ...node.rect };
+  const style = element.getAttribute("style");
+  return () => {
+    if (style === null) element.removeAttribute("style");
+    else element.setAttribute("style", style);
+    node.rect = { ...rect };
+  };
+}
+
+function beginDragSnapshot(nodes: SelectedNode[]): void {
+  drag.restores = nodes.map(snapshotNodeDragRestore);
 }
 
 function selectSingle(node: SelectedNode | null): void {
@@ -585,13 +614,16 @@ function findPathHandleAtPoint(
   clientY: number,
 ): { anchorIndex: number; handleIndex: number; point: Point } | null {
   if (!selection || !isPathNode(selection)) return null;
+  revalidateSelection();
+  if (!selection || !isPathNode(selection)) return null;
+  const rect = syncNodeRect(selection);
   const d = getPathData(selection);
   if (!d) return null;
   try {
     const handles = getControlHandles(d);
     for (const h of handles) {
-      const sx = (selection.rect.x + h.point.x - camera.x) * camera.z;
-      const sy = (selection.rect.y + h.point.y - camera.y) * camera.z;
+      const sx = (rect.x + h.point.x - camera.x) * camera.z;
+      const sy = (rect.y + h.point.y - camera.y) * camera.z;
       if (Math.hypot(clientX - sx, clientY - sy) <= 8) {
         return h;
       }
@@ -605,6 +637,9 @@ function findPathAnchorAtPoint(
   clientY: number,
 ): { index: number; point: Point } | null {
   if (!selection || !isPathNode(selection)) return null;
+  revalidateSelection();
+  if (!selection || !isPathNode(selection)) return null;
+  const rect = syncNodeRect(selection);
   const d = getPathData(selection);
   if (!d) return null;
   try {
@@ -612,8 +647,8 @@ function findPathAnchorAtPoint(
     for (let i = 0; i < anchors.length; i++) {
       const a = anchors[i];
       if (!a) continue;
-      const sx = (selection.rect.x + a.x - camera.x) * camera.z;
-      const sy = (selection.rect.y + a.y - camera.y) * camera.z;
+      const sx = (rect.x + a.x - camera.x) * camera.z;
+      const sy = (rect.y + a.y - camera.y) * camera.z;
       if (Math.hypot(clientX - sx, clientY - sy) <= 8) {
         return { index: i, point: a };
       }
@@ -647,97 +682,89 @@ function boardWorldOrigin(element: Element): { x: number; y: number } {
   return { x: 0, y: 0 };
 }
 
-function worldRectOf(element: Element): {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-} {
-  const bounds = element.getBoundingClientRect();
+function boardAppliedScale(board: HTMLElement): number {
+  const bounds = board.getBoundingClientRect();
+  const width = board.offsetWidth;
+  if (width <= 0) return 1;
+  const scale = bounds.width / width;
+  return Number.isFinite(scale) && scale > 0 ? scale : 1;
+}
+
+function worldRectOf(element: Element): WorldRect {
   const board = element.closest<HTMLElement>(".board");
   if (!board) {
-    return {
-      x: bounds.left / camera.z + camera.x,
-      y: bounds.top / camera.z + camera.y,
-      width: bounds.width / camera.z,
-      height: bounds.height / camera.z,
-    };
+    return worldRectFromClientRect(
+      element.getBoundingClientRect(),
+      {
+        rect: { left: 0, top: 0, width: 0, height: 0 },
+        origin: { x: camera.x, y: camera.y },
+      },
+      camera.z,
+    );
   }
-  const origin = boardWorldOrigin(element);
-  if (!(element instanceof HTMLElement)) {
-    let ancestor: Element | null = element.parentElement;
-    while (ancestor && !(ancestor instanceof HTMLElement)) {
-      ancestor = ancestor.parentElement;
-    }
-    const host = ancestor instanceof HTMLElement ? ancestor : null;
-    if (!host) {
-      return {
-        x: origin.x + bounds.left,
-        y: origin.y + bounds.top,
-        width: bounds.width,
-        height: bounds.height,
-      };
-    }
-    const hostOffset = layoutOffsetWithin(host, board);
-    const hostBounds = host.getBoundingClientRect();
-    return {
-      x: origin.x + hostOffset.x + (bounds.left - hostBounds.left),
-      y: origin.y + hostOffset.y + (bounds.top - hostBounds.top),
-      width: bounds.width,
-      height: bounds.height,
-    };
-  }
-  const offset = layoutOffsetWithin(element, board);
+  return worldRectFromClientRect(
+    element.getBoundingClientRect(),
+    { rect: board.getBoundingClientRect(), origin: boardWorldOrigin(element) },
+    boardAppliedScale(board),
+  );
+}
+
+function syncNodeRect(node: SelectedNode): WorldRect {
+  node.rect = worldRectOf(node.element);
+  return node.rect;
+}
+
+function resolveLiveNode(node: SelectedNode): SelectedNode | null {
+  if (node.element.isConnected) return node;
+  const resolved = selectionElementOf(node.file, node.path);
+  if (!resolved || resolved.tag !== node.tag) return null;
   return {
-    x: origin.x + offset.x,
-    y: origin.y + offset.y,
-    width: element.offsetWidth,
-    height: element.offsetHeight,
+    ...node,
+    element: resolved.element,
+    name: resolved.name,
+    rect: resolved.rect,
   };
 }
 
-function accumulateLayoutOffset(
-  element: Element,
-  board: HTMLElement,
-): {
-  x: number;
-  y: number;
-} {
-  let x = 0;
-  let y = 0;
-  let current: HTMLElement | null = element as HTMLElement;
-  while (current) {
-    x += current.offsetLeft;
-    y += current.offsetTop;
-    if (current === board) break;
-    const parent = current.offsetParent as HTMLElement | null;
-    if (!parent) break;
-    current = parent;
+function revalidateSelection(): void {
+  if (
+    (selection === null || selection.element.isConnected) &&
+    multiSelection.every((node) => node.element.isConnected)
+  ) {
+    return;
   }
-  return { x, y };
-}
-
-function layoutOffsetWithin(
-  element: HTMLElement,
-  board: HTMLElement,
-): { x: number; y: number } {
-  const own = accumulateLayoutOffset(element, board);
-  const boardOffset = accumulateLayoutOffset(board, board);
-  return { x: own.x - boardOffset.x, y: own.y - boardOffset.y };
+  const keyOf = (node: SelectedNode) => nodeKeyOf(node.file, node.path);
+  const before = selection
+    ? [keyOf(selection), ...multiSelection.map(keyOf)].join("|")
+    : "";
+  let replaced = false;
+  const resolve = (node: SelectedNode) => {
+    const next = resolveLiveNode(node);
+    if (next !== node) replaced = true;
+    return next;
+  };
+  const live = multiSelection.map(resolve);
+  multiSelection = live.filter((node): node is SelectedNode => node !== null);
+  selection = selection ? resolve(selection) : null;
+  if (!selection && multiSelection.length > 0) {
+    selection = multiSelection.at(-1) ?? null;
+  }
+  if (!selection) multiSelection = [];
+  const after =
+    selection !== null
+      ? [keyOf(selection), ...multiSelection.map(keyOf)].join("|")
+      : "";
+  if (replaced) invalidateGuideTargets();
+  if (replaced || before !== after) emitSelection();
 }
 
 function refreshSelectionRect(): void {
-  const nodes =
-    multiSelection.length > 0 ? multiSelection : selection ? [selection] : [];
-  for (const node of nodes) {
-    node.rect = worldRectOf(node.element);
-  }
+  revalidateSelection();
+  for (const node of multiSelection) syncNodeRect(node);
 }
 
 function refreshRectsOf(nodes: SelectedNode[]): void {
-  for (const node of nodes) {
-    node.rect = worldRectOf(node.element);
-  }
+  for (const node of nodes) syncNodeRect(node);
 }
 function updateBoardResolutions(): void {
   if (!compositor) return;
@@ -875,6 +902,7 @@ async function mountPage(file: string) {
   compositor?.camera.set(camera);
   updateBoardResolutions();
   refreshSelectionRect();
+  drawOverlay();
 }
 
 function triggerHotspotFlash(): void {
@@ -957,9 +985,9 @@ function drawPrototypeConnectionLine(
   const origin = boardWorldOrigin(fromNode.element);
   const currentBoardW = currentBoard?.offsetWidth ?? 1440;
 
-  const startX = (fromNode.rect.x + fromNode.rect.width - camera.x) * camera.z;
-  const startY =
-    (fromNode.rect.y + fromNode.rect.height / 2 - camera.y) * camera.z;
+  const rect = syncNodeRect(fromNode);
+  const startX = (rect.x + rect.width - camera.x) * camera.z;
+  const startY = (rect.y + rect.height / 2 - camera.y) * camera.z;
 
   let targetWorldX: number;
   let targetWorldY: number;
@@ -1319,6 +1347,7 @@ function drawOverlay() {
   if (!overlay) return;
   overlay.replaceChildren();
   if (editingText) return;
+  revalidateSelection();
 
   if (showHotspots || prototypeHotspotsFlashing) {
     drawHotspotOverlays();
@@ -1328,7 +1357,7 @@ function drawOverlay() {
     return;
   }
   for (const node of multiSelection) {
-    const rect = node.rect;
+    const rect = syncNodeRect(node);
     const box = document.createElement("div");
     box.className = "selection-box";
     box.style.left = `${(rect.x - camera.x) * camera.z}px`;
@@ -1338,7 +1367,7 @@ function drawOverlay() {
     overlay.appendChild(box);
   }
   if (selection && multiSelection.length <= 1 && isEditableNode(selection)) {
-    const rect = selection.rect;
+    const rect = syncNodeRect(selection);
     if (isPathNode(selection)) {
       const d = getPathData(selection);
       if (d) {
@@ -1592,14 +1621,14 @@ function drawOverlay() {
   if (
     altPressed &&
     selection &&
-    hoveredNode &&
+    hoveredNode?.element.isConnected &&
     hoveredNode.element !== selection.element
   ) {
     renderAltMeasurementsOverlay(
       overlay,
       camera,
-      selection.rect,
-      hoveredNode.rect,
+      syncNodeRect(selection),
+      syncNodeRect(hoveredNode),
     );
   }
   if (
@@ -1612,7 +1641,7 @@ function drawOverlay() {
     if (info) {
       currentLayoutHandles = computeLayoutHandles(
         info,
-        selection.rect,
+        syncNodeRect(selection),
         camera,
         (el) => worldRectOf(el),
       );
@@ -1668,7 +1697,8 @@ function hitTest(clientX: number, clientY: number): SelectedNode | null {
   const wy = clientY / camera.z + camera.y;
   for (const [element, info] of [...nodeIndex].reverse()) {
     const board = element.closest<HTMLElement>(".board");
-    if (!board || !isSelectableElement(element, board)) continue;
+    if (!board || !element.isConnected) continue;
+    if (!isSelectableElement(element, board)) continue;
     const rect = worldRectOf(element);
     if (
       rect.width === 0 ||
@@ -1696,7 +1726,9 @@ function hitTest(clientX: number, clientY: number): SelectedNode | null {
 
 function handleAtPoint(clientX: number, clientY: number): HandleId | null {
   if (!selection || editingText) return null;
-  const rect = selection.rect;
+  revalidateSelection();
+  if (!selection) return null;
+  const rect = syncNodeRect(selection);
   const handleSize = HANDLE_SIZE / camera.z > 4 ? HANDLE_SIZE : 4;
   for (const handle of HANDLES) {
     const hx =
@@ -1717,6 +1749,7 @@ function handleAtPoint(clientX: number, clientY: number): HandleId | null {
 
 function selectionElementOf(file: string, path: number[]): SelectedNode | null {
   for (const [element, info] of nodeIndex) {
+    if (!element.isConnected) continue;
     if (info.file !== file) continue;
     if (info.path.join("/") !== path.join("/")) continue;
     return {
@@ -1737,7 +1770,10 @@ function commitMove(node: SelectedNode, dx: number, dy: number): void {
   const usesAttrsX = flags.attrs.includes("x") && flags.attrs.includes("y");
   const target = { file: node.file, start: 0, end: 0, path: node.path };
   const boardOrigin = boardWorldOrigin(node.element);
-  const orig = drag.nodeOrigins?.get(node) ?? drag.originRect ?? node.rect;
+  const orig =
+    drag.nodeOrigins?.get(nodeKeyOf(node.file, node.path)) ??
+    drag.originRect ??
+    syncNodeRect(node);
   const x = Math.round(orig.x + dx - boardOrigin.x);
   const y = Math.round(orig.y + dy - boardOrigin.y);
   const commands: unknown[] = [];
@@ -1828,7 +1864,9 @@ function commitMultiMove(dx: number, dy: number): void {
     const flags = flagsOf(node);
     const target = { file: node.file, start: 0, end: 0, path: node.path };
     const boardOrigin = boardWorldOrigin(node.element);
-    const orig = drag.nodeOrigins?.get(node) ?? node.rect;
+    const orig =
+      drag.nodeOrigins?.get(nodeKeyOf(node.file, node.path)) ??
+      syncNodeRect(node);
     const x = Math.round(orig.x + dx - boardOrigin.x);
     const y = Math.round(orig.y + dy - boardOrigin.y);
     if (flags.attrs.includes("x") && flags.attrs.includes("y")) {
@@ -1872,12 +1910,12 @@ function previewMove(dx: number, dy: number): void {
   for (const node of nodes) {
     const element = node.element as HTMLElement;
     const origin = boardWorldOrigin(node.element);
-    const orig = drag.nodeOrigins?.get(node) ?? drag.originRect;
+    const orig =
+      drag.nodeOrigins?.get(nodeKeyOf(node.file, node.path)) ?? drag.originRect;
     element.style.position = "absolute";
     element.style.left = `${orig.x + snappedDx - origin.x}px`;
     element.style.top = `${orig.y + snappedDy - origin.y}px`;
-    node.rect.x = orig.x + snappedDx;
-    node.rect.y = orig.y + snappedDy;
+    syncNodeRect(node);
   }
   drawOverlay();
 }
@@ -1966,7 +2004,7 @@ function previewScale(
   element.style.top = `${y - origin.y}px`;
   element.style.width = `${width}px`;
   element.style.height = `${height}px`;
-  selection.rect = { x, y, width, height };
+  syncNodeRect(selection);
   drawOverlay();
 }
 
@@ -1975,9 +2013,10 @@ function nudge(dx: number, dy: number): void {
   for (const node of multiSelection) {
     const element = node.element as HTMLElement;
     const origin = boardWorldOrigin(node.element);
+    const rect = syncNodeRect(node);
     element.style.position = "absolute";
-    element.style.left = `${node.rect.x + dx - origin.x}px`;
-    element.style.top = `${node.rect.y + dy - origin.y}px`;
+    element.style.left = `${rect.x + dx - origin.x}px`;
+    element.style.top = `${rect.y + dy - origin.y}px`;
   }
   refreshRectsOf(multiSelection);
   commitMultiMove(dx, dy);
@@ -2639,8 +2678,9 @@ async function init() {
       if (event.altKey) {
         const d = getPathData(selection);
         if (d) {
-          const localX = event.clientX / camera.z + camera.x - selection.rect.x;
-          const localY = event.clientY / camera.z + camera.y - selection.rect.y;
+          const rect = syncNodeRect(selection);
+          const localX = event.clientX / camera.z + camera.x - rect.x;
+          const localY = event.clientY / camera.z + camera.y - rect.y;
           const newD = addPointToPath(
             d,
             Math.round(localX),
@@ -2678,7 +2718,8 @@ async function init() {
       beginNodeInteraction();
       drag.mode = "scale";
       drag.handle = handle;
-      drag.originRect = { ...selection.rect };
+      drag.originRect = { ...syncNodeRect(selection) };
+      beginDragSnapshot([selection]);
       drag.x = event.clientX;
       drag.y = event.clientY;
       drag.moved = false;
@@ -2693,10 +2734,14 @@ async function init() {
       if (multiSelection.every(isEditableNode)) {
         beginNodeInteraction();
         drag.mode = "move";
-        drag.originRect = selection ? { ...selection.rect } : null;
+        drag.originRect = selection ? { ...syncNodeRect(selection) } : null;
         drag.nodeOrigins = new Map(
-          multiSelection.map((n) => [n, { ...n.rect }]),
+          multiSelection.map((n) => {
+            const rect = syncNodeRect(n);
+            return [nodeKeyOf(n.file, n.path), { x: rect.x, y: rect.y }];
+          }),
         );
+        beginDragSnapshot(multiSelection);
         drag.x = event.clientX;
         drag.y = event.clientY;
         drag.moved = false;
@@ -2708,8 +2753,11 @@ async function init() {
       if (isEditableNode(hit)) {
         beginNodeInteraction();
         drag.mode = "move";
-        drag.originRect = { ...hit.rect };
-        drag.nodeOrigins = new Map([[hit, { ...hit.rect }]]);
+        drag.originRect = { ...syncNodeRect(hit) };
+        drag.nodeOrigins = new Map([
+          [nodeKeyOf(hit.file, hit.path), drag.originRect],
+        ]);
+        beginDragSnapshot([hit]);
         drag.x = event.clientX;
         drag.y = event.clientY;
         drag.moved = false;
@@ -2808,12 +2856,9 @@ async function init() {
       drag.pathAnchorIndex !== undefined &&
       drag.pathHandleIndex !== undefined
     ) {
-      const newX = Math.round(
-        event.clientX / camera.z + camera.x - selection.rect.x,
-      );
-      const newY = Math.round(
-        event.clientY / camera.z + camera.y - selection.rect.y,
-      );
+      const rect = syncNodeRect(selection);
+      const newX = Math.round(event.clientX / camera.z + camera.x - rect.x);
+      const newY = Math.round(event.clientY / camera.z + camera.y - rect.y);
       try {
         let newD = moveControlHandle(
           drag.originalD,
@@ -3123,6 +3168,7 @@ async function init() {
         const found: SelectedNode[] = [];
         for (const [element, info] of nodeIndex) {
           if (element.tagName.toLowerCase() === "section") continue;
+          if (!element.isConnected) continue;
           const eRect = worldRectOf(element);
           if (
             eRect.x < mRect.x + mRect.width &&
@@ -3177,7 +3223,8 @@ async function init() {
     drag.handle = null;
     drag.originRect = null;
     drag.nodeOrigins = undefined;
-    drag.moved = false;
+    pendingDragRestores = drag.restores ?? null;
+    drag.restores = undefined;
     activeSmartGuides = null;
     drag.snappedDx = undefined;
     drag.snappedDy = undefined;
@@ -3203,6 +3250,7 @@ async function init() {
     drag.originRect = null;
     drag.moved = false;
     drag.nodeOrigins = undefined;
+    drag.restores = undefined;
     activeSmartGuides = null;
     drag.snappedDx = undefined;
     drag.snappedDy = undefined;
@@ -3338,6 +3386,16 @@ async function init() {
 
   bridge?.onFiles((payload) => {
     applyTokensCss((payload as { files?: unknown } | null)?.files);
+  });
+
+  bridge?.onCommandFailed(() => {
+    const restores = pendingDragRestores;
+    pendingDragRestores = null;
+    if (drag.restores) {
+      drag.restores = undefined;
+    }
+    for (const restore of restores ?? []) restore();
+    drawOverlay();
   });
 
   bridge?.onManifest((payload) => {
