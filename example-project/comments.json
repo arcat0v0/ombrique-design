@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "threads": [
+    {
+      "id": "thread_1793387649922",
+      "anchor": {
+        "type": "node",
+        "nodeRef": {
+          "file": "pages/home.tsx",
+          "start": 0,
+          "end": 0,
+          "path": [0, 0]
+        },
+        "x": 196,
+        "y": 564,
+        "pageId": "home"
+      },
+      "messages": [
+        {
+          "id": "msg_1793387649922",
+          "author": "User",
+          "body": "新评论",
+          "createdAt": "2026-10-30T19:14:09.922Z"
+        }
+      ],
+      "resolved": false,
+      "createdAt": "2026-10-30T19:14:09.922Z",
+      "updatedAt": "2026-10-30T19:14:09.922Z"
+    }
+  ]
+}
