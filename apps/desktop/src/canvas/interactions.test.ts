@@ -1,6 +1,10 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { renderRulersOverlay } from "./interactions";
+import {
+  DRAG_THRESHOLD_PX,
+  exceedsDragThreshold,
+  renderRulersOverlay,
+} from "./interactions";
 
 const context = {
   scale: vi.fn(),
@@ -81,5 +85,19 @@ describe("renderRulersOverlay", () => {
     expect(document.getElementById("ruler-top")).toBe(topCanvas);
     // Re-drawn on camera change
     expect(context.fillRect).toHaveBeenCalledTimes(4);
+  });
+});
+
+describe("exceedsDragThreshold", () => {
+  it("ignores pointer jitter below the threshold", () => {
+    expect(exceedsDragThreshold(1, 1)).toBe(false);
+    expect(exceedsDragThreshold(-2, 0)).toBe(false);
+    expect(exceedsDragThreshold(0, 0)).toBe(false);
+  });
+
+  it("detects movement at or beyond the threshold on either axis or diagonally", () => {
+    expect(exceedsDragThreshold(DRAG_THRESHOLD_PX, 0)).toBe(true);
+    expect(exceedsDragThreshold(0, -DRAG_THRESHOLD_PX)).toBe(true);
+    expect(exceedsDragThreshold(3, 3)).toBe(true);
   });
 });

@@ -45,3 +45,9 @@ export function resolveParentOrigin(
   const parentRect = rectFn(parent);
   return { x: parentRect.x, y: parentRect.y };
 }
+
+export function isPageRootElement(element: Element): boolean {
+  if (element.classList.contains("board")) return true;
+  const parent = element.parentElement;
+  return Boolean(parent?.classList.contains("board"));
+}

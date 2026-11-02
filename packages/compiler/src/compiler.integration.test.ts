@@ -61,6 +61,22 @@ describe("design compiler", () => {
     expect(html).toContain("/@vite/client");
   });
 
+  it("serves a board root module that shares the page React instance", async () => {
+    const reactUrl = (code: string | null) =>
+      code?.match(/from "([^"]*\/deps\/react\.js[^"]*)"/)?.[1];
+    const boardRoot = await compiler.transform("/@ombrique/board-root");
+    expect(boardRoot).toContain("createBoardRoot");
+    expect(boardRoot).toMatch(/\/deps\/react-dom_client\.js/);
+    const runtimeIndex = await compiler.transform("/pages/home.tsx");
+    const frameUrl = runtimeIndex
+      ?.match(/from "([^"]*\/runtime\/src\/index\.ts)"/)?.[1]
+      ?.replace(/index\.ts$/, "Frame.tsx");
+    expect(frameUrl).toBeTruthy();
+    const frame = await compiler.transform(frameUrl as string);
+    expect(reactUrl(frame)).toBeTruthy();
+    expect(reactUrl(boardRoot)).toBe(reactUrl(frame));
+  });
+
   it("delivers hmr updates over the custom channel on file change", async () => {
     const { promise, resolve } = Promise.withResolvers<void>();
     compiler.setWire((payload) => {

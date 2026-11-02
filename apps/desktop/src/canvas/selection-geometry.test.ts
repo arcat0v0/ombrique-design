@@ -1,6 +1,10 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { resolveParentOrigin, worldRectFromClientRect } from "./selection-geometry";
+import {
+  isPageRootElement,
+  resolveParentOrigin,
+  worldRectFromClientRect,
+} from "./selection-geometry";
 
 const rect = (left: number, top: number, width: number, height: number) => ({
   left,
@@ -178,5 +182,27 @@ describe("worldRectFromClientRect", () => {
       expect(origin).toEqual({ x: 340, y: 580 });
       board.remove();
     });
+  });
+});
+
+describe("isPageRootElement", () => {
+  it("treats the board and its direct child as page roots", () => {
+    const board = document.createElement("section");
+    board.className = "board";
+    const root = document.createElement("section");
+    const child = document.createElement("div");
+    root.appendChild(child);
+    board.appendChild(root);
+
+    expect(isPageRootElement(board)).toBe(true);
+    expect(isPageRootElement(root)).toBe(true);
+    expect(isPageRootElement(child)).toBe(false);
+  });
+
+  it("is false for elements outside any board", () => {
+    const loose = document.createElement("div");
+    document.body.appendChild(loose);
+    expect(isPageRootElement(loose)).toBe(false);
+    loose.remove();
   });
 });

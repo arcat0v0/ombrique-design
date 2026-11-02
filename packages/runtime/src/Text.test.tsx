@@ -13,6 +13,13 @@ describe("Text", () => {
     expect(div?.style.whiteSpace).toBe("pre-wrap");
   });
 
+  it("marks itself as the text primitive so only text nodes enter text editing", () => {
+    const { container } = render(<Text>Hello</Text>);
+    expect(container.querySelector("div")?.getAttribute("data-primitive")).toBe(
+      "text",
+    );
+  });
+
   it("positions absolutely when x/y are given", () => {
     const { container } = render(
       <Text x={30} y={40} width={200} fontSize={18} fill="#123456">

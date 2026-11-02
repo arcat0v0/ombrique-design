@@ -1,4 +1,4 @@
-import { createRoot, type Root } from "react-dom/client";
+import { createRoot } from "react-dom/client";
 import { createElement, type ComponentType } from "react";
 import { FloatingToolSwitcher, type CanvasTool } from "@ombrique/editor-ui";
 import type { CommentThread, Manifest } from "@ombrique/protocol";
@@ -25,6 +25,7 @@ import {
   type LayoutHandle,
   type PaddingEdge,
   computeLayoutHandles,
+  exceedsDragThreshold,
   getAutoLayoutInfo,
   layoutHandleAtPoint,
   referenceLineAtPoint,
@@ -37,6 +38,7 @@ import {
 import {
   resolveParentOrigin,
   worldRectFromClientRect,
+  isPageRootElement,
   type WorldRect,
 } from "./selection-geometry";
 import { serializeNodeToSvg } from "./export-node";
@@ -148,7 +150,12 @@ const canvas: HTMLElement = canvasElement;
 const overlay: HTMLElement = overlayElement;
 let stage: HTMLElement = canvas;
 
-const boards = new Map<string, { element: HTMLElement; reactRoot: Root }>();
+interface BoardRoot {
+  render(component: ComponentType): void;
+  unmount(): void;
+}
+
+const boards = new Map<string, { element: HTMLElement; reactRoot: BoardRoot }>();
 const boardScales = new Map<Element, number>();
 const nodeIndex = new Map<Element, { file: string; path: number[] }>();
 let manifest: Manifest | null = null;
@@ -385,6 +392,10 @@ function flagsOf(node: SelectedNode): {
 function isEditableNode(node: SelectedNode): boolean {
   const flags = flagsOf(node);
   return !flags.locked && !flags.generated;
+}
+
+function isMovableNode(node: SelectedNode): boolean {
+  return isEditableNode(node) && !isPageRootElement(node.element);
 }
 
 function snapshotNodeDragRestore(node: SelectedNode): () => void {
@@ -673,6 +684,27 @@ async function importPage(
   return module.default ?? null;
 }
 
+type BoardRootFactory = (element: HTMLElement) => BoardRoot;
+
+const BOARD_ROOT_MODULE: string = "/@ombrique/board-root";
+
+let boardRootFactory: Promise<BoardRootFactory> | null = null;
+
+function loadBoardRootFactory(): Promise<BoardRootFactory> {
+  boardRootFactory ??= (
+    import(/* @vite-ignore */ BOARD_ROOT_MODULE) as Promise<{
+      createBoardRoot: BoardRootFactory;
+    }>
+  ).then(
+    (module) => module.createBoardRoot,
+    (error: unknown) => {
+      boardRootFactory = null;
+      throw error;
+    },
+  );
+  return boardRootFactory;
+}
+
 function boardWorldOrigin(element: Element): { x: number; y: number } {
   const board = element.closest<HTMLElement>(".board");
   if (!board) return { x: 0, y: 0 };
@@ -905,6 +937,7 @@ function fitToViewport(): void {
 
 async function mountPage(file: string) {
   if (!manifest) return;
+  const createBoardRoot = await loadBoardRootFactory();
   exitDomBoard();
   clearBoardSnapshot();
   currentFile = file;
@@ -922,7 +955,7 @@ async function mountPage(file: string) {
     element.className = "board";
     element.dataset.file = file;
     element.setAttribute("drawable", "");
-    const root = createRoot(element);
+    const root = createBoardRoot(element);
     board = { element, reactRoot: root };
     boards.set(file, board);
     stage.appendChild(element);
@@ -933,7 +966,7 @@ async function mountPage(file: string) {
       console.warn(`[canvas] page module unavailable: ${file}`, error);
     }
     if (component) {
-      root.render(createElement(component));
+      root.render(component);
       const { promise, resolve } = Promise.withResolvers<void>();
       requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
       await promise;
@@ -1314,6 +1347,7 @@ async function navigatePrototypePage(
     return;
   }
 
+  const createBoardRoot = await loadBoardRootFactory();
   const outgoingBoard = currentFile ? boards.get(currentFile) : null;
   const newFile = targetPage.file;
   currentFile = newFile;
@@ -1326,7 +1360,7 @@ async function navigatePrototypePage(
   incomingElement.style.left = "0px";
   incomingElement.style.top = "0px";
 
-  const incomingRoot = createRoot(incomingElement);
+  const incomingRoot = createBoardRoot(incomingElement);
   boards.set(newFile, { element: incomingElement, reactRoot: incomingRoot });
   stage.appendChild(incomingElement);
 
@@ -1337,7 +1371,7 @@ async function navigatePrototypePage(
     console.warn("[canvas] page unavailable during transition:", newFile, e);
   }
   if (component) {
-    incomingRoot.render(createElement(component));
+    incomingRoot.render(component);
     const { promise, resolve } = Promise.withResolvers<void>();
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
     await promise;
@@ -1790,6 +1824,7 @@ function hitTest(
     const board = element.closest<HTMLElement>(".board");
     if (!board || !element.isConnected) continue;
     if (!isSelectableElement(element, board)) continue;
+    if (isPageRootElement(element)) continue;
     const rect = worldRectOf(element);
     if (
       rect.width === 0 ||
@@ -2147,6 +2182,7 @@ function beginTextEdit(): void {
   if (!selection || editingText) return;
   if (!isEditableNode(selection)) return;
   const element = selection.element as HTMLElement;
+  if (element.getAttribute("data-primitive") !== "text") return;
   if (element.children.length > 0) return;
   editingOriginal = element.textContent ?? "";
   editingText = element;
@@ -3136,7 +3172,7 @@ async function init() {
         multiSelection.length > 1
           ? multiSelection
           : [selection ?? hitInSelection];
-      if (activeNodes.every(isEditableNode)) {
+      if (activeNodes.every(isMovableNode)) {
         beginNodeInteraction();
         drag.mode = "move";
         drag.originRect = selection ? { ...syncNodeRect(selection) } : null;
@@ -3164,7 +3200,7 @@ async function init() {
       return;
     }
     if (hit && multiSelection.some((s) => s.element === hit.element)) {
-      if (multiSelection.every(isEditableNode)) {
+      if (multiSelection.every(isMovableNode)) {
         beginNodeInteraction();
         drag.mode = "move";
         drag.originRect = selection ? { ...syncNodeRect(selection) } : null;
@@ -3183,7 +3219,7 @@ async function init() {
     }
     if (hit) {
       selectSingle(hit);
-      if (isEditableNode(hit)) {
+      if (isMovableNode(hit)) {
         beginNodeInteraction();
         drag.mode = "move";
         drag.originRect = { ...syncNodeRect(hit) };
@@ -3450,7 +3486,7 @@ async function init() {
     }
     const dx = event.clientX - drag.x;
     const dy = event.clientY - drag.y;
-    if (Math.abs(dx) + Math.abs(dy) > 0) drag.moved = true;
+    if (!drag.moved && exceedsDragThreshold(dx, dy)) drag.moved = true;
     if (drag.mode === "create" && createPreview) {
       createPreview.x1 = event.clientX / camera.z + camera.x;
       createPreview.y1 = event.clientY / camera.z + camera.y;
@@ -3476,11 +3512,17 @@ async function init() {
       drawOverlay();
       return;
     }
-    if (drag.mode === "move" && selection && drag.originRect) {
+    if (drag.mode === "move" && selection && drag.originRect && drag.moved) {
       previewMove(dx / camera.z, dy / camera.z);
       return;
     }
-    if (drag.mode === "scale" && selection && drag.handle && drag.originRect) {
+    if (
+      drag.mode === "scale" &&
+      selection &&
+      drag.handle &&
+      drag.originRect &&
+      drag.moved
+    ) {
       previewScale(drag.handle, drag.originRect, dx / camera.z, dy / camera.z);
     }
   }

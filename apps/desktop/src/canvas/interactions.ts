@@ -221,6 +221,12 @@ export function layoutHandleAtPoint(
   return null;
 }
 
+export const DRAG_THRESHOLD_PX = 3;
+
+export function exceedsDragThreshold(dx: number, dy: number): boolean {
+  return Math.hypot(dx, dy) >= DRAG_THRESHOLD_PX;
+}
+
 export function referenceLineAtPoint(
   lines: ReferenceLine[],
   camera: CameraState,

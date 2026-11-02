@@ -147,4 +147,42 @@ describe("Frame", () => {
     const child = container.querySelector('[data-testid="child"]');
     expect(child?.closest('[data-mode="dark"]')).toBe(section);
   });
+
+  it("absolutely positions nested frames inside a free-layout frame", () => {
+    const { container } = render(
+      <Frame width={400} height={400}>
+        <Frame data-testid="a" x={10} y={20} width={100} height={50} />
+        <Frame data-testid="b" x={30} y={40} width={100} height={50} />
+      </Frame>,
+    );
+    const root = container.querySelector("section");
+    expect(root?.style.position).toBe("relative");
+    for (const [id, left, top] of [
+      ["a", "10px", "20px"],
+      ["b", "30px", "40px"],
+    ]) {
+      const el = container.querySelector<HTMLElement>(`[data-testid="${id}"]`);
+      expect(el?.style.position).toBe("absolute");
+      expect(el?.style.left).toBe(left);
+      expect(el?.style.top).toBe(top);
+    }
+  });
+
+  it("keeps nested frames in flow inside auto-layout and grid frames", () => {
+    const { container } = render(
+      <Frame width={400} height={400} layout="vertical">
+        <Frame data-testid="flex-child" width={100} height={50}>
+          <Frame data-testid="free-grandchild" x={5} y={6} width={10} height={10} />
+        </Frame>
+        <Frame width={100} height={100} grid={{ columns: 2 }}>
+          <Frame data-testid="grid-child" width={10} height={10} />
+        </Frame>
+      </Frame>,
+    );
+    const style = (id: string) =>
+      container.querySelector<HTMLElement>(`[data-testid="${id}"]`)?.style;
+    expect(style("flex-child")?.position).toBe("relative");
+    expect(style("grid-child")?.position).toBe("relative");
+    expect(style("free-grandchild")?.position).toBe("absolute");
+  });
 });

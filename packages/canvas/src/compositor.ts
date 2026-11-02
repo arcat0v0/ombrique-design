@@ -731,6 +731,7 @@ export async function createCompositor(
     const view = visibleRect(cam, cssW, cssH);
     let visible = 0;
     for (const b of boards) {
+      if (b.suspended) continue;
       if (!intersects({ x: b.x, y: b.y, w: b.w, h: b.h }, view)) continue;
       if (b.hiRes) b.hiRes.lastUsed = frameNo;
       pass.setBindGroup(0, b.bind);

@@ -1,4 +1,9 @@
-import { createServer, createServerHotChannel, DevEnvironment } from "vite";
+import {
+  createServer,
+  createServerHotChannel,
+  DevEnvironment,
+  type Plugin,
+} from "vite";
 import { createRequire } from "node:module";
 export type { WirePayload } from "./channel";
 import {
@@ -8,6 +13,34 @@ import {
 } from "./channel";
 
 const require = createRequire(import.meta.url);
+
+const BOARD_ROOT_URL = "/@ombrique/board-root";
+const BOARD_ROOT_ID = "\0ombrique-board-root";
+const BOARD_ROOT_SOURCE = `import { createElement } from "react";
+import { createRoot } from "react-dom/client";
+
+export function createBoardRoot(element) {
+  const root = createRoot(element);
+  return {
+    render(component) {
+      root.render(createElement(component));
+    },
+    unmount() {
+      root.unmount();
+    },
+  };
+}
+`;
+
+const boardRootPlugin: Plugin = {
+  name: "ombrique:board-root",
+  resolveId(id) {
+    return id === BOARD_ROOT_URL ? BOARD_ROOT_ID : null;
+  },
+  load(id) {
+    return id === BOARD_ROOT_ID ? BOARD_ROOT_SOURCE : null;
+  },
+};
 
 export interface DesignCompiler {
   transform(url: string): Promise<string | null>;
@@ -31,6 +64,16 @@ export async function createDesignCompiler(
     configFile: false,
     server: { middlewareMode: true, ws: false },
     oxc: { jsx: { runtime: "automatic", development: true } },
+    plugins: [boardRootPlugin],
+    optimizeDeps: {
+      include: [
+        "react",
+        "react/jsx-dev-runtime",
+        "react/jsx-runtime",
+        "react-dom",
+        "react-dom/client",
+      ],
+    },
     resolve: {
       alias: [
         { find: /^react$/, replacement: require.resolve("react") },

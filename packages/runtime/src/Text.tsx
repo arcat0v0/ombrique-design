@@ -26,6 +26,7 @@ export function Text({
     <div
       {...rest}
       {...dataNameAttr(name, rest)}
+      data-primitive="text"
       className={joinClass(className)}
       style={{
         whiteSpace: "pre-wrap",

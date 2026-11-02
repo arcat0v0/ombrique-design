@@ -59,9 +59,6 @@ const preloadDir = join(here, "../preload");
 app.commandLine.appendSwitch("enable-blink-features", "CanvasDrawElement");
 app.commandLine.appendSwitch("enable-unsafe-webgpu");
 app.commandLine.appendSwitch("use-webgpu-adapter", "vulkan");
-if (process.platform === "linux") {
-  app.commandLine.appendSwitch("enable-features", "Vulkan");
-}
 
 protocol.registerSchemesAsPrivileged([
   {

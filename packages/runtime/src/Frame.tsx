@@ -1,5 +1,12 @@
-import type { CSSProperties, HTMLAttributes } from "react";
+import {
+  type CSSProperties,
+  createContext,
+  type HTMLAttributes,
+  useContext,
+} from "react";
 import { dataNameAttr, joinClass } from "./internal";
+
+const FreeLayoutParentContext = createContext(false);
 
 export type FrameLayout = "free" | "vertical" | "horizontal";
 export type FrameAlign = "start" | "center" | "end" | "stretch" | "baseline";
@@ -100,8 +107,13 @@ export function Frame({
   children,
   ...rest
 }: FrameProps) {
+  const insideFreeLayout = useContext(FreeLayoutParentContext);
+  const isFreeLayout = layout === "free" && !grid;
   const base: HTMLAttributes<HTMLElement>["style"] = {
-    position: "relative",
+    position:
+      insideFreeLayout && (x !== undefined || y !== undefined)
+        ? "absolute"
+        : "relative",
     width,
     height,
   };
@@ -159,7 +171,9 @@ export function Frame({
       className={joinClass(className)}
       style={{ ...base, ...style }}
     >
-      {children}
+      <FreeLayoutParentContext.Provider value={isFreeLayout}>
+        {children}
+      </FreeLayoutParentContext.Provider>
     </section>
   );
 }
