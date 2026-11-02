@@ -90,7 +90,6 @@ let shellWindow: BrowserWindow | null = null;
 let canvasView: WebContentsView | null = null;
 let canvasReady = false;
 let canvasVisible = false;
-let overlayActive = false;
 let projectDelivered = false;
 let lastCanvasBounds: CanvasBounds | null = null;
 let pendingProjectMessage: Record<string, unknown> | null = null;
@@ -341,12 +340,8 @@ function applyCanvasBounds(bounds: CanvasBounds) {
   canvasView.setBounds({ x, y, width, height });
 }
 
-function syncCanvasVisibility() {
-  canvasView?.setVisible(canvasVisible && !overlayActive);
-}
-
 function flushCanvasMessages() {
-  if (!canvasView || !canvasReady || !canvasVisible || overlayActive) return;
+  if (!canvasView || !canvasReady || !canvasVisible) return;
   if (!projectDelivered && pendingProjectMessage) {
     canvasView.webContents.send("ombrique:project", pendingProjectMessage);
     projectDelivered = true;
@@ -377,8 +372,8 @@ ipcMain.on("ombrique:canvasBounds", (_event, bounds: CanvasBounds) => {
   applyCanvasBounds(lastCanvasBounds);
   if (revealCanvasOnNextBounds) {
     revealCanvasOnNextBounds = false;
+    canvasView?.setVisible(true);
     canvasVisible = true;
-    syncCanvasVisibility();
   }
   flushCanvasMessages();
 });
@@ -506,7 +501,6 @@ function createShellWindowContents() {
     canvasView = null;
     canvasReady = false;
     canvasVisible = false;
-    overlayActive = false;
     projectDelivered = false;
     lastCanvasBounds = null;
     pendingProjectMessage = null;
@@ -723,8 +717,7 @@ function recordRecentProject(
 
 function scheduleThumbnailCapture(root: string): void {
   setTimeout(async () => {
-    if (projectRoot !== root || !canvasView || !canvasVisible || overlayActive)
-      return;
+    if (projectRoot !== root || !canvasView || !canvasVisible) return;
     try {
       const image = await canvasView.webContents.capturePage();
       if (image.isEmpty()) return;
@@ -761,16 +754,8 @@ ipcMain.handle("ombrique:removeRecentProject", (_event, root: string) => {
 ipcMain.handle("ombrique:showWorkspace", () => {
   revealCanvasOnNextBounds = false;
   canvasVisible = false;
-  syncCanvasVisibility();
+  canvasView?.setVisible(false);
   return true;
-});
-
-ipcMain.on("ombrique:canvasOverlay", (_event, active: boolean) => {
-  const next = Boolean(active);
-  if (overlayActive === next) return;
-  overlayActive = next;
-  syncCanvasVisibility();
-  if (!overlayActive) flushCanvasMessages();
 });
 
 ipcMain.handle("ombrique:openExample", async () => {

@@ -227,7 +227,6 @@ export interface ShellActions {
     width: number;
     height: number;
   }) => void;
-  setCanvasOverlayActive?: (active: boolean) => void;
   togglePrototypeMode?: () => void;
   toggleHotspots?: () => void;
   saveVersion?: (message: string) => Promise<boolean>;
