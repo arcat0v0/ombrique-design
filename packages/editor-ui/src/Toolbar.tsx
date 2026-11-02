@@ -1,7 +1,6 @@
 import type { RecentProject } from "@ombrique/protocol";
 import {
   ArchiveIcon,
-  CheckIcon,
   ChevronDownIcon,
   CombineIcon,
   ComponentIcon,
@@ -23,7 +22,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -45,6 +43,7 @@ import {
 } from "@/components/ui/tooltip";
 import type { CanvasStats } from "./types";
 import { ApplicationMenu } from "./ApplicationMenu";
+import { ViewMenu } from "./ViewMenu";
 
 export interface ToolbarProps {
   canUndo: boolean;
@@ -81,9 +80,6 @@ export interface ToolbarProps {
   onToggleFullscreen?: () => void;
   onToggleDevtools?: () => void;
   onReloadRenderer?: () => void;
-  onMinimizeWindow?: () => void;
-  onToggleWindowMaximize?: () => void;
-  onCloseWindow?: () => void;
   prototypeMode?: boolean;
   showHotspots?: boolean;
   onTogglePrototypeMode?: () => void;
@@ -125,9 +121,6 @@ export function Toolbar({
   onToggleFullscreen,
   onToggleDevtools,
   onReloadRenderer,
-  onMinimizeWindow,
-  onToggleWindowMaximize,
-  onCloseWindow,
   prototypeMode = false,
   showHotspots = false,
   onTogglePrototypeMode,
@@ -143,7 +136,6 @@ export function Toolbar({
             canUndo={canUndo}
             canRedo={canRedo}
             canDelete={canDelete}
-            zoom={zoom}
             busy={busy}
             onOpenProject={onOpenProject}
             onCreateProject={onCreateProject}
@@ -162,14 +154,6 @@ export function Toolbar({
             onUndo={onUndo}
             onRedo={onRedo}
             onDeleteSelection={onDeleteSelection}
-            onZoomTo={onZoomTo}
-            onZoomToFit={onZoomToFit}
-            onToggleFullscreen={onToggleFullscreen}
-            onToggleDevtools={onToggleDevtools}
-            onReloadRenderer={onReloadRenderer}
-            onMinimizeWindow={onMinimizeWindow}
-            onToggleWindowMaximize={onToggleWindowMaximize}
-            onCloseWindow={onCloseWindow}
           />
 
           {onShowWorkspace && (
@@ -428,54 +412,6 @@ export function Toolbar({
 
             <Separator orientation="vertical" className="mx-1 h-4" />
 
-            <DropdownMenu>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="xs"
-                      aria-label="缩放比例"
-                      title="缩放比例"
-                      disabled={busy}
-                      className="h-7 gap-0.5 px-1.5 text-xs font-mono font-normal tabular-nums"
-                    >
-                      <span>{Math.round(zoom * 100)}%</span>
-                      <ChevronDownIcon className="size-3 opacity-50" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">缩放与视图</TooltipContent>
-              </Tooltip>
-              <DropdownMenuContent align="end" className="w-40">
-                {[0.25, 0.5, 0.75, 1, 1.5, 2].map((factor) => {
-                  const active = Math.abs(zoom - factor) < 0.005;
-                  return (
-                    <DropdownMenuItem
-                      key={factor}
-                      onClick={() => onZoomTo?.(factor)}
-                      disabled={!onZoomTo}
-                      className="justify-between text-xs font-mono cursor-pointer"
-                    >
-                      <span>{factor * 100}%</span>
-                      {active && (
-                        <CheckIcon className="size-3 text-primary shrink-0" />
-                      )}
-                    </DropdownMenuItem>
-                  );
-                })}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onClick={onZoomToFit}
-                  className="text-xs cursor-pointer gap-1.5"
-                >
-                  <Maximize2Icon className="size-3.5" />
-                  <span>适应画布</span>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -616,6 +552,17 @@ export function Toolbar({
               </div>
             </>
           )}
+
+          <Separator orientation="vertical" className="mx-1 h-4" />
+          <ViewMenu
+            zoom={zoom}
+            busy={busy}
+            onZoomTo={onZoomTo}
+            onZoomToFit={onZoomToFit}
+            onToggleFullscreen={onToggleFullscreen}
+            onToggleDevtools={onToggleDevtools}
+            onReloadRenderer={onReloadRenderer}
+          />
         </div>
       </div>
     </TooltipProvider>

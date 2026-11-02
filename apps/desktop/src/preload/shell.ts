@@ -122,15 +122,6 @@ contextBridge.exposeInMainWorld("ombriqueShell", {
   onClipboardEdit: (cb: (payload: unknown) => void) => {
     ipcRenderer.on("ombrique:clipboardEdit", (_event, payload) => cb(payload));
   },
-  minimizeWindow: () => {
-    ipcRenderer.send("ombrique:windowControl", "minimize");
-  },
-  toggleWindowMaximize: () => {
-    ipcRenderer.send("ombrique:windowControl", "toggleMaximize");
-  },
-  closeWindow: () => {
-    ipcRenderer.send("ombrique:windowControl", "close");
-  },
   toggleFullscreen: () => {
     ipcRenderer.send("ombrique:windowControl", "toggleFullscreen");
   },

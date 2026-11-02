@@ -247,9 +247,6 @@ function EditorShell({ view, actions }: ShellProps) {
                 onToggleFullscreen={actions.toggleFullscreen}
                 onToggleDevtools={actions.toggleDevtools}
                 onReloadRenderer={actions.reloadRenderer}
-                onMinimizeWindow={actions.minimizeWindow}
-                onToggleWindowMaximize={actions.toggleWindowMaximize}
-                onCloseWindow={actions.closeWindow}
                 prototypeMode={view.prototypeMode}
                 showHotspots={view.showHotspots}
                 onTogglePrototypeMode={actions.togglePrototypeMode}

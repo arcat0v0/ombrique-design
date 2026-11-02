@@ -279,6 +279,7 @@ function wireDocHost(host: DocHost) {
       revealCanvasOnNextBounds = !canvasVisible;
       flushCanvasMessages();
       const meta = projectOpenMeta?.root === root ? projectOpenMeta : null;
+      shellWindow?.setTitle(`${meta?.label ?? basename(root)} — Ombrique`);
       if (!process.env.OMBRIQUE_E2E && !meta?.transient) {
         try {
           recordRecentProject(
@@ -427,6 +428,7 @@ function createShellWindow() {
     height: 1020,
     minWidth: 1200,
     minHeight: 720,
+    frame: true,
     title: "Ombrique",
     backgroundColor: "#0e0e12",
     webPreferences: {
@@ -444,16 +446,6 @@ ipcMain.on("ombrique:windowControl", (_event, action: string) => {
   const win = BrowserWindow.fromWebContents(_event.sender) ?? shellWindow;
   if (!win) return;
   switch (action) {
-    case "minimize":
-      win.minimize();
-      break;
-    case "toggleMaximize":
-      if (win.isMaximized()) win.unmaximize();
-      else win.maximize();
-      break;
-    case "close":
-      win.close();
-      break;
     case "toggleFullscreen":
       win.setFullScreen(!win.isFullScreen());
       break;
@@ -755,6 +747,7 @@ ipcMain.handle("ombrique:showWorkspace", () => {
   revealCanvasOnNextBounds = false;
   canvasVisible = false;
   canvasView?.setVisible(false);
+  shellWindow?.setTitle("Ombrique");
   return true;
 });
 

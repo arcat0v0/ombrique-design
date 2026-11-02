@@ -2,26 +2,16 @@ import type { RecentProject } from "@ombrique/protocol";
 import {
   BoxIcon,
   ChevronDownIcon,
-  Code2Icon,
   DownloadIcon,
-  ExpandIcon,
   FilePlus2Icon,
   FolderIcon,
   FolderOpenIcon,
   FolderSearchIcon,
   LayoutGridIcon,
-  Maximize2Icon,
-  MinusIcon,
   PackageOpenIcon,
   Redo2Icon,
-  RotateCwIcon,
-  ScanIcon,
-  SquareIcon,
   Trash2Icon,
   Undo2Icon,
-  XIcon,
-  ZoomInIcon,
-  ZoomOutIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -39,7 +29,6 @@ export interface ApplicationMenuProps {
   canUndo: boolean;
   canRedo: boolean;
   canDelete?: boolean;
-  zoom: number;
   busy?: boolean;
   onOpenProject: () => void;
   onCreateProject?: () => void;
@@ -52,21 +41,12 @@ export interface ApplicationMenuProps {
   onUndo: () => void;
   onRedo: () => void;
   onDeleteSelection?: () => void;
-  onZoomTo?: (factor: number) => void;
-  onZoomToFit: () => void;
-  onToggleFullscreen?: () => void;
-  onToggleDevtools?: () => void;
-  onReloadRenderer?: () => void;
-  onMinimizeWindow?: () => void;
-  onToggleWindowMaximize?: () => void;
-  onCloseWindow?: () => void;
 }
 
 export function ApplicationMenu({
   canUndo,
   canRedo,
   canDelete = false,
-  zoom,
   busy = false,
   onOpenProject,
   onCreateProject,
@@ -79,14 +59,6 @@ export function ApplicationMenu({
   onUndo,
   onRedo,
   onDeleteSelection,
-  onZoomTo,
-  onZoomToFit,
-  onToggleFullscreen,
-  onToggleDevtools,
-  onReloadRenderer,
-  onMinimizeWindow,
-  onToggleWindowMaximize,
-  onCloseWindow,
 }: ApplicationMenuProps) {
   return (
     <DropdownMenu>
@@ -241,104 +213,6 @@ export function ApplicationMenu({
             <Trash2Icon />
             <span>删除所选</span>
             <Kbd className="ml-auto">Delete</Kbd>
-          </DropdownMenuItem>
-        </DropdownMenuGroup>
-
-        <DropdownMenuSeparator />
-
-        <DropdownMenuGroup>
-          <DropdownMenuLabel>视图</DropdownMenuLabel>
-          <DropdownMenuItem
-            disabled={busy || !onZoomTo}
-            onSelect={() => onZoomTo?.(zoom * 1.25)}
-            className="px-2 py-1.5 text-xs"
-          >
-            <ZoomInIcon />
-            <span>放大</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            disabled={busy || !onZoomTo}
-            onSelect={() => onZoomTo?.(zoom / 1.25)}
-            className="px-2 py-1.5 text-xs"
-          >
-            <ZoomOutIcon />
-            <span>缩小</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            disabled={busy || !onZoomTo}
-            onSelect={() => onZoomTo?.(1)}
-            className="px-2 py-1.5 text-xs"
-          >
-            <ScanIcon />
-            <span>100%</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            disabled={busy}
-            onSelect={onZoomToFit}
-            className="px-2 py-1.5 text-xs"
-          >
-            <Maximize2Icon />
-            <span>适应画布</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            disabled={!onToggleFullscreen}
-            onSelect={onToggleFullscreen}
-            title={onToggleFullscreen ? undefined : "当前桌面桥接不可用"}
-            className="px-2 py-1.5 text-xs"
-          >
-            <ExpandIcon />
-            <span>全屏</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            disabled={!onToggleDevtools}
-            onSelect={onToggleDevtools}
-            title={onToggleDevtools ? undefined : "当前桌面桥接不可用"}
-            className="px-2 py-1.5 text-xs"
-          >
-            <Code2Icon />
-            <span>开发者工具</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            disabled={!onReloadRenderer}
-            onSelect={onReloadRenderer}
-            title={onReloadRenderer ? undefined : "当前桌面桥接不可用"}
-            className="px-2 py-1.5 text-xs"
-          >
-            <RotateCwIcon />
-            <span>重新加载</span>
-          </DropdownMenuItem>
-        </DropdownMenuGroup>
-
-        <DropdownMenuSeparator />
-
-        <DropdownMenuGroup>
-          <DropdownMenuLabel>窗口</DropdownMenuLabel>
-          <DropdownMenuItem
-            disabled={!onMinimizeWindow}
-            onSelect={onMinimizeWindow}
-            title={onMinimizeWindow ? undefined : "当前桌面桥接不可用"}
-            className="px-2 py-1.5 text-xs"
-          >
-            <MinusIcon />
-            <span>最小化</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            disabled={!onToggleWindowMaximize}
-            onSelect={onToggleWindowMaximize}
-            title={onToggleWindowMaximize ? undefined : "当前桌面桥接不可用"}
-            className="px-2 py-1.5 text-xs"
-          >
-            <SquareIcon />
-            <span>最大化/还原</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            disabled={!onCloseWindow}
-            onSelect={onCloseWindow}
-            title={onCloseWindow ? undefined : "当前桌面桥接不可用"}
-            className="px-2 py-1.5 text-xs"
-          >
-            <XIcon />
-            <span>关闭</span>
           </DropdownMenuItem>
         </DropdownMenuGroup>
       </DropdownMenuContent>

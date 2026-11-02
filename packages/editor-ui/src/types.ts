@@ -207,9 +207,6 @@ export interface ShellActions {
   toggleFullscreen?: () => void;
   toggleDevtools?: () => void;
   reloadRenderer?: () => void;
-  minimizeWindow?: () => void;
-  toggleWindowMaximize?: () => void;
-  closeWindow?: () => void;
   exportNode?: (
     formatOrSettings: "png" | "jpg" | "webp" | "svg" | "pdf" | ExportSetting[],
     scale?: number,

@@ -216,9 +216,6 @@ export interface ShellBridge {
   }) => void;
   reloadCanvas?: () => Promise<boolean>;
   onToolChanged?: (cb: (tool: CanvasTool) => void) => void;
-  minimizeWindow?: () => void;
-  toggleWindowMaximize?: () => void;
-  closeWindow?: () => void;
   toggleFullscreen?: () => void;
   toggleDevtools?: () => void;
   reloadRenderer?: () => void;
@@ -1258,15 +1255,6 @@ export function createShellState() {
     },
     zoomToFit: () => {
       bridge?.zoomToFit?.();
-    },
-    minimizeWindow: () => {
-      bridge?.minimizeWindow?.();
-    },
-    toggleWindowMaximize: () => {
-      bridge?.toggleWindowMaximize?.();
-    },
-    closeWindow: () => {
-      bridge?.closeWindow?.();
     },
     toggleFullscreen: () => {
       bridge?.toggleFullscreen?.();

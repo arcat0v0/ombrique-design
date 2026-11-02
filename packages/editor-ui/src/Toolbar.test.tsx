@@ -90,7 +90,7 @@ describe("Toolbar", () => {
       zoom: 1.5,
       stats: { fps: 60, visible: 12, uploads: 3, paints: 9 },
     });
-    expect(getByTitle("缩放比例").textContent).toBe("150%");
+    expect(getByTitle("视图与缩放").textContent).toBe("150%");
     const stats = getByTitle("画布统计");
     expect(stats.textContent).toContain("60 FPS");
     expect(stats.textContent).toContain("可见 12");
@@ -244,7 +244,7 @@ describe("Toolbar", () => {
     expect(onBundleProject).toHaveBeenCalledTimes(1);
   });
 
-  it("renders zoom presets dropdown and prototype mode toggle", async () => {
+  it("opens the view menu for zoom and toggles prototype mode", async () => {
     const onZoomTo = vi.fn();
     const onTogglePrototypeMode = vi.fn();
     const { getByLabelText, findByText, rerender } = renderToolbar({
@@ -254,7 +254,7 @@ describe("Toolbar", () => {
       onTogglePrototypeMode,
     });
 
-    const zoomTrigger = getByLabelText("缩放比例");
+    const zoomTrigger = getByLabelText("视图与缩放");
     expect(zoomTrigger.textContent).toContain("150%");
     fireEvent.pointerDown(zoomTrigger, { button: 0 });
     fireEvent.click(await findByText("100%"));
