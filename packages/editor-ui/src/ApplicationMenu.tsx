@@ -106,7 +106,7 @@ export function ApplicationMenu({
           <ChevronDownIcon data-icon="inline-end" className="opacity-60" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-64 p-1.5">
+      <DropdownMenuContent align="start" className="w-56 p-1.5">
         <DropdownMenuGroup>
           <DropdownMenuLabel>文件</DropdownMenuLabel>
           {onCreateProject && (
