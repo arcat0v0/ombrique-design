@@ -3187,7 +3187,18 @@ export default function Home() {
               );
               if (!el) return null;
               const r = el.getBoundingClientRect();
-              return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+              const board = el.closest(".board");
+              const br = board ? board.getBoundingClientRect() : null;
+              const cv = document.getElementById("cv");
+              const cr = cv ? cv.getBoundingClientRect() : null;
+              return {
+                x: Math.round(r.left + r.width / 2),
+                y: Math.round(r.top + r.height / 2),
+                rect: { left: r.left, top: r.top, width: r.width, height: r.height },
+                board: br ? { left: br.left, top: br.top, width: br.width, height: br.height } : null,
+                canvas: cr ? { left: cr.left, top: cr.top, width: cr.width, height: cr.height } : null,
+                inner: { w: window.innerWidth, h: window.innerHeight },
+              };
             })()
           `)
             .catch(() => null);
@@ -3247,6 +3258,158 @@ export default function Home() {
       // Cleanup UI temporary project
       try {
         rmSync(uiProj, { recursive: true, force: true });
+      } catch {
+        // ignore
+      }
+    }
+
+    if (process.env.OMBRIQUE_E2E_SHORTCUTS) {
+      const log = (label: string, ok: boolean) =>
+        logs.push(`[shortcuts] ${label} ${ok ? "OK" : "FAIL"}`);
+      const { mkdtempSync, writeFileSync, mkdirSync, readFileSync, rmSync } =
+        await import("node:fs");
+      const { tmpdir } = await import("node:os");
+      const shortcutsProj = mkdtempSync(
+        join(tmpdir(), "ombrique-shortcuts-e2e-"),
+      );
+      mkdirSync(join(shortcutsProj, "pages"), { recursive: true });
+      writeFileSync(
+        join(shortcutsProj, "ombrique.json"),
+        JSON.stringify(
+          {
+            formatVersion: 1,
+            pages: [{ id: "home", name: "Home", file: "pages/home.tsx" }],
+          },
+          null,
+          2,
+        ),
+        "utf8",
+      );
+      const homeSource = `import { Frame, Rect, Text } from "@ombrique/runtime";
+
+export default function Home() {
+  return (
+    <Frame name="Home" x={0} y={0} width={1440} height={900} fill="#ffffff">
+      <Text name="Title" x={96} y={96} width={720} fontSize={56} fill="#111111">
+        Design in code
+      </Text>
+      <Rect name="Card" x={96} y={300} width={320} height={180} fill="#22aa66" />
+    </Frame>
+  );
+}
+`;
+      writeFileSync(join(shortcutsProj, "pages/home.tsx"), homeSource, "utf8");
+      ensureDocHost().send({
+        type: "shell",
+        message: { kind: "openProject", path: shortcutsProj },
+      });
+      await wait(3000);
+
+      const source = () =>
+        readFileSync(join(shortcutsProj, "pages/home.tsx"), "utf8");
+      const canvasWeb = canvasView?.webContents;
+      const shellWeb = shellWindow?.webContents;
+      const press = (
+        target: Electron.WebContents | null | undefined,
+        keyCode: string,
+        modifiers: Array<"control" | "shift" | "alt" | "meta"> = [],
+      ) => {
+        target?.sendInputEvent({ type: "keyDown", keyCode, modifiers });
+        target?.sendInputEvent({ type: "keyUp", keyCode, modifiers });
+      };
+      const selectLayerRow = (name: string) =>
+        shellWeb
+          ?.executeJavaScript(
+            `(async () => {
+              const rows = Array.from(document.querySelectorAll(".layer-row"));
+              const row = rows.find((r) => r.textContent?.includes(${JSON.stringify(name)}));
+              if (!row) return false;
+              row.click();
+              await new Promise((r) => setTimeout(r, 900));
+              return true;
+            })()`,
+          )
+          .catch(() => false);
+      const selectionBox = () =>
+        canvasWeb
+          ?.executeJavaScript(
+            `(() => {
+              const box = document.querySelector("#overlay .selection-box");
+              if (!box) return null;
+              const r = box.getBoundingClientRect();
+              return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+            })()`,
+          )
+          .catch(() => null);
+
+      await selectLayerRow("Card");
+      const box = await selectionBox();
+      log("layer row selection paints canvas selection", Boolean(box));
+      press(canvasWeb, "Delete");
+      await wait(1800);
+      log("Delete on canvas removes node", !source().includes('"Card"'));
+      press(canvasWeb, "z", ["control"]);
+      await wait(1800);
+      log("Ctrl+Z restores deleted node", source().includes('"Card"'));
+
+      await selectLayerRow("Card");
+      const clickTarget = await selectionBox();
+      if (clickTarget) {
+        press(canvasWeb, "Escape");
+        await wait(400);
+        log("Escape clears canvas selection", (await selectionBox()) === null);
+        canvasWeb?.sendInputEvent({
+          type: "mouseDown",
+          x: clickTarget.x,
+          y: clickTarget.y,
+          button: "left",
+          clickCount: 1,
+        });
+        await wait(150);
+        canvasWeb?.sendInputEvent({
+          type: "mouseUp",
+          x: clickTarget.x,
+          y: clickTarget.y,
+          button: "left",
+          clickCount: 1,
+        });
+        await wait(900);
+        log("canvas click selects node", Boolean(await selectionBox()));
+        press(canvasWeb, "Delete");
+        await wait(1800);
+        log(
+          "Delete after canvas click removes node",
+          !source().includes('"Card"'),
+        );
+        press(canvasWeb, "z", ["control"]);
+        await wait(1800);
+        log(
+          "Ctrl+Z restores after canvas click delete",
+          source().includes('"Card"'),
+        );
+      }
+
+      await selectLayerRow("Card");
+      press(shellWeb, "Backspace");
+      await wait(1800);
+      log("Backspace in shell removes node", !source().includes('"Card"'));
+
+      press(shellWeb, "z", ["control"]);
+      await wait(1800);
+      log("shell Ctrl+Z restores deleted node", source().includes('"Card"'));
+
+      await selectLayerRow("Card");
+      press(canvasWeb, "d", ["control"]);
+      await wait(1800);
+      log(
+        "Ctrl+D duplicates selection",
+        (source().match(/name="Card"/g) ?? []).length >= 2,
+      );
+      press(shellWeb, "z", ["control"]);
+      await wait(1500);
+
+      try {
+        rmSync(shortcutsProj, { recursive: true, force: true });
       } catch {
         // ignore
       }

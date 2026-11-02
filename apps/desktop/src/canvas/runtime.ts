@@ -1,6 +1,11 @@
 import { createRoot } from "react-dom/client";
 import { createElement, type ComponentType } from "react";
-import { FloatingToolSwitcher, type CanvasTool } from "@ombrique/editor-ui";
+import {
+  FloatingToolSwitcher,
+  resolveShortcut,
+  type CanvasTool,
+  type ShortcutCommand,
+} from "@ombrique/editor-ui";
 import type { CommentThread, Manifest } from "@ombrique/protocol";
 import {
   createCompositor,
@@ -2255,55 +2260,10 @@ function cancelTextEdit(): void {
   drawOverlay();
 }
 
-function sendClipboard(kind: "copy" | "cut" | "paste", dx = 0, dy = 0): void {
-  bridge?.send("ombrique:clipboardEdit", {
-    kind,
-    dx,
-    dy,
-    nodes: multiSelection.map((node) => ({
-      file: node.file,
-      path: node.path,
-    })),
-  });
-}
-
-function commitDuplicate(nodes: SelectedNode[]): void {
-  const editable = nodes.filter(isEditableNode);
-  if (editable.length === 0) return;
-  const commands: unknown[] = [];
-  for (const node of editable) {
-    commands.push({
-      kind: "duplicateNode",
-      target: { file: node.file, start: 0, end: 0, path: node.path },
-      dx: 20,
-      dy: 20,
-    });
-  }
-  bridge?.send("ombrique:canvasEdit", { commands });
-}
-
-function commitDelete(nodes: SelectedNode[]): void {
-  const editable = nodes.filter(isEditableNode);
-  if (editable.length === 0) return;
-  bridge?.send("ombrique:canvasEdit", {
-    commands: [
-      {
-        kind: "deleteNodes",
-        targets: editable.map((node) => ({
-          file: node.file,
-          start: 0,
-          end: 0,
-          path: node.path,
-        })),
-      },
-    ],
-  });
-}
-
-function selectAll(): void {
-  if (!currentFile) return;
+function topLevelNodes(): SelectedNode[] {
+  if (!currentFile) return [];
   const board = boards.get(currentFile);
-  if (!board) return;
+  if (!board) return [];
   const topLevel: SelectedNode[] = [];
   for (const child of Array.from(board.element.children)) {
     const info = nodeIndex.get(child);
@@ -2317,6 +2277,11 @@ function selectAll(): void {
       element: child,
     });
   }
+  return topLevel;
+}
+
+function selectAll(): void {
+  const topLevel = topLevelNodes();
   if (topLevel.length > 0) {
     multiSelection = topLevel;
     selection = topLevel[topLevel.length - 1] ?? null;
@@ -2401,71 +2366,6 @@ function zoomToSelection(): void {
   refreshSelectionRect();
   emitZoom();
   drawOverlay();
-}
-
-function commitGroup(nodes: SelectedNode[]): void {
-  const editable = nodes.filter(isEditableNode);
-  if (editable.length === 0) return;
-  const targets = editable.map((n) => ({
-    file: n.file,
-    start: 0,
-    end: 0,
-    path: n.path,
-  }));
-  bridge?.send("ombrique:canvasEdit", {
-    commands: [
-      {
-        kind: "groupNodes",
-        targets,
-        pageFile: editable[0]?.file,
-        name: "Group",
-      },
-    ],
-  });
-}
-
-function commitUngroup(nodes: SelectedNode[]): void {
-  const editable = nodes.filter(isEditableNode);
-  if (editable.length === 0) return;
-  const commands = editable.map((n) => ({
-    kind: "ungroupNode",
-    target: { file: n.file, start: 0, end: 0, path: n.path },
-  }));
-  bridge?.send("ombrique:canvasEdit", { commands });
-}
-
-function toggleSelectedHidden(): void {
-  const activeNodes =
-    multiSelection.length > 0 ? multiSelection : selection ? [selection] : [];
-  const editable = activeNodes.filter(isEditableNode);
-  if (editable.length === 0) return;
-  const commands = editable.map((n) => {
-    const isHidden =
-      n.element.hasAttribute("hidden") ||
-      (n.element as HTMLElement).style.display === "none";
-    return {
-      kind: "setAttrs",
-      target: { file: n.file, start: 0, end: 0, path: n.path },
-      attrs: { hidden: !isHidden },
-    };
-  });
-  bridge?.send("ombrique:canvasEdit", { commands });
-}
-
-function toggleSelectedLocked(): void {
-  const activeNodes =
-    multiSelection.length > 0 ? multiSelection : selection ? [selection] : [];
-  const editable = activeNodes.filter(isEditableNode);
-  if (editable.length === 0) return;
-  const commands = editable.map((n) => {
-    const isLocked = n.element.hasAttribute("data-locked");
-    return {
-      kind: "setAttrs",
-      target: { file: n.file, start: 0, end: 0, path: n.path },
-      attrs: { "data-locked": isLocked ? null : "" },
-    };
-  });
-  bridge?.send("ombrique:canvasEdit", { commands });
 }
 
 async function runPerf500(): Promise<void> {
@@ -2592,6 +2492,120 @@ async function runPerf500(): Promise<void> {
   }
 }
 
+function nodeFromElement(
+  element: Element,
+  info: { file: string; path: number[] },
+): SelectedNode {
+  return {
+    file: info.file,
+    path: info.path,
+    tag: element.tagName.toLowerCase(),
+    name: element.getAttribute("data-name"),
+    rect: worldRectOf(element),
+    element,
+  };
+}
+
+function childNodeOf(node: SelectedNode): SelectedNode | null {
+  for (const [element, info] of nodeIndex) {
+    if (!element.isConnected || info.file !== node.file) continue;
+    if (info.path.length !== node.path.length + 1) continue;
+    if (!node.path.every((value, index) => info.path[index] === value)) {
+      continue;
+    }
+    return nodeFromElement(element, info);
+  }
+  return null;
+}
+
+function parentNodeOf(node: SelectedNode): SelectedNode | null {
+  if (node.path.length <= 1) return null;
+  return selectionElementOf(node.file, node.path.slice(0, -1));
+}
+
+function siblingNodesOf(node: SelectedNode): SelectedNode[] {
+  const parentKey = node.path.slice(0, -1).join("/");
+  const siblings: SelectedNode[] = [];
+  for (const [element, info] of nodeIndex) {
+    if (!element.isConnected || info.file !== node.file) continue;
+    if (info.path.length !== node.path.length) continue;
+    if (info.path.slice(0, -1).join("/") !== parentKey) continue;
+    const board = element.closest<HTMLElement>(".board");
+    if (!board || !isSelectableElement(element, board)) continue;
+    siblings.push(nodeFromElement(element, info));
+  }
+  return siblings;
+}
+
+function runCanvasShortcut(command: ShortcutCommand): boolean {
+  switch (command.kind) {
+    case "tool":
+      activateTool(command.tool);
+      return true;
+    case "escape":
+      if (prototypeMode) {
+        setPrototypeMode(false);
+        return true;
+      }
+      createPreview = null;
+      penDraft = null;
+      activateTool("select");
+      selectSingle(null);
+      return true;
+    case "selectAll":
+      selectAll();
+      return true;
+    case "nudge":
+      nudge(command.dx, command.dy);
+      return true;
+    case "zoom":
+      if (command.action === "in") zoomBy(1.25);
+      else if (command.action === "out") zoomBy(0.8);
+      else if (command.action === "fit") fitToViewport();
+      else if (command.action === "selection") zoomToSelection();
+      else zoomTo100();
+      return true;
+    case "toggleRulers":
+      showRulers = !showRulers;
+      drawOverlay();
+      return true;
+    case "selectChild": {
+      if (!selection) return true;
+      const child = childNodeOf(selection);
+      if (child) selectSingle(child);
+      return true;
+    }
+    case "selectParent": {
+      if (!selection) return true;
+      const parent = parentNodeOf(selection);
+      if (parent) selectSingle(parent);
+      return true;
+    }
+    case "cycleLayer": {
+      if (!selection) {
+        const first = topLevelNodes()[0];
+        if (first) selectSingle(first);
+        return true;
+      }
+      const siblings = siblingNodesOf(selection);
+      if (siblings.length < 2) return true;
+      const key = nodeKeyOf(selection.file, selection.path);
+      const index = siblings.findIndex(
+        (node) => nodeKeyOf(node.file, node.path) === key,
+      );
+      if (index < 0) return true;
+      const next =
+        siblings[
+          (index + command.direction + siblings.length) % siblings.length
+        ];
+      if (next) selectSingle(next);
+      return true;
+    }
+    default:
+      return false;
+  }
+}
+
 async function init() {
   const host = document.createElement("canvas");
   host.id = "cv";
@@ -2637,6 +2651,11 @@ async function init() {
 
   window.addEventListener("keydown", (event) => {
     if (editingText) return;
+    if (event.code === "Space") {
+      spacePressed = true;
+      event.preventDefault();
+      return;
+    }
     if (toolMode === "pen") {
       if (event.key === "Enter") {
         event.preventDefault();
@@ -2651,171 +2670,19 @@ async function init() {
         return;
       }
     }
-    const mod = event.metaKey || event.ctrlKey;
-    const key = event.key.toLowerCase();
-
-    // 撤销 / 重做 (Undo / Redo)
-    if (mod && (key === "z" || key === "y")) {
-      event.preventDefault();
-      if (key === "y" || event.shiftKey) {
-        bridge?.send("ombrique:canvasAction", { kind: "redo" });
-      } else {
-        bridge?.send("ombrique:canvasAction", { kind: "undo" });
-      }
-      return;
-    }
-
-    // 全选 (Select All)
-    if (mod && key === "a") {
-      event.preventDefault();
-      selectAll();
-      return;
-    }
-
-    // 编组 / 解组 (Group / Ungroup)
-    if (mod && key === "g") {
-      event.preventDefault();
-      const activeNodes =
-        multiSelection.length > 0
-          ? multiSelection
-          : selection
-            ? [selection]
-            : [];
-      if (event.shiftKey) {
-        commitUngroup(activeNodes);
-      } else {
-        commitGroup(activeNodes);
-      }
-      return;
-    }
-
-    // 显隐与锁定快捷键 (Toggle Hide / Lock)
-    if (mod && event.shiftKey && key === "h") {
-      event.preventDefault();
-      toggleSelectedHidden();
-      return;
-    }
-    if (mod && event.shiftKey && key === "l") {
-      event.preventDefault();
-      toggleSelectedLocked();
-      return;
-    }
-
-    // 缩放与视图快捷键
-    if (event.shiftKey && event.key === "1") {
-      event.preventDefault();
-      fitToViewport();
-      return;
-    }
-    if (event.shiftKey && event.key === "2") {
-      event.preventDefault();
-      zoomToSelection();
-      return;
-    }
-    if ((mod && key === "0") || (event.shiftKey && event.key === "0")) {
-      event.preventDefault();
-      zoomTo100();
-      return;
-    }
-    if (mod && (key === "=" || key === "+")) {
-      event.preventDefault();
-      zoomBy(1.25);
-      return;
-    }
-    if (mod && (key === "-" || key === "_")) {
-      event.preventDefault();
-      zoomBy(0.8);
-      return;
-    }
-    if (event.shiftKey && key === "r" && !mod) {
-      event.preventDefault();
-      showRulers = !showRulers;
-      drawOverlay();
-      return;
-    }
-
-    if (!mod) {
-      const shortcuts: Record<string, CanvasTool> = {
-        v: "select",
-        h: "hand",
-        f: "frame",
-        r: "rect",
-        o: "ellipse",
-        s: "star",
-        p: "pen",
-        t: "text",
-        c: "comment",
-      };
-      const tool = shortcuts[event.key.toLowerCase()];
-      if (tool) {
-        event.preventDefault();
-        activateTool(tool);
-        return;
-      }
-    }
-    if (event.key === "Escape") {
-      if (prototypeMode) {
-        setPrototypeMode(false);
-        return;
-      }
-      createPreview = null;
-      penDraft = null;
-      activateTool("select");
-      selectSingle(null);
-      return;
-    }
-    if (event.code === "Space") {
-      spacePressed = true;
-      event.preventDefault();
-      return;
-    }
-    if (mod && event.key.toLowerCase() === "c") {
-      event.preventDefault();
-      sendClipboard("copy");
-      return;
-    }
-    if (mod && event.key.toLowerCase() === "x") {
-      event.preventDefault();
-      sendClipboard("cut");
-      return;
-    }
-    if (mod && event.key.toLowerCase() === "v") {
-      event.preventDefault();
-      sendClipboard("paste", 20, 20);
-      return;
-    }
-    if (mod && event.key.toLowerCase() === "d") {
-      event.preventDefault();
-      commitDuplicate(multiSelection);
-      return;
-    }
-    if (event.key === "Backspace" || event.key === "Delete") {
-      event.preventDefault();
-      commitDelete(multiSelection);
-      selectSingle(null);
-      return;
-    }
-    const step = event.shiftKey ? 10 : 1;
-    if (event.key === "ArrowLeft") {
-      event.preventDefault();
-      nudge(-step, 0);
-      return;
-    }
-    if (event.key === "ArrowRight") {
-      event.preventDefault();
-      nudge(step, 0);
-      return;
-    }
-    if (event.key === "ArrowUp") {
-      event.preventDefault();
-      nudge(0, -step);
-      return;
-    }
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      nudge(0, step);
-      return;
-    }
+    const command = resolveShortcut(event, {
+      hasSelection: multiSelection.length > 0,
+    });
+    if (!command) return;
+    event.preventDefault();
+    if (runCanvasShortcut(command)) return;
+    bridge?.send("ombrique:canvasShortcut", {
+      command,
+      nodes: multiSelection.map((node) => ({
+        file: node.file,
+        path: node.path,
+      })),
+    });
   });
   window.addEventListener("keyup", (event) => {
     if (event.code === "Space") spacePressed = false;
@@ -4079,6 +3946,11 @@ async function init() {
     }
     if (command?.channel === "ombrique:zoomToFit") {
       fitToViewport();
+      return;
+    }
+    if (command?.channel === "ombrique:shortcut") {
+      const shortcut = command.payload as ShortcutCommand | null;
+      if (shortcut) runCanvasShortcut(shortcut);
       return;
     }
     if (command?.channel === "ombrique:resolvedProps") {

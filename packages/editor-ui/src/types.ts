@@ -9,6 +9,7 @@ import type {
   Manifest,
   RecentProject,
 } from "@ombrique/protocol";
+import type { ShortcutCommand } from "./shortcuts";
 
 export interface LayerNode {
   id: string;
@@ -141,10 +142,12 @@ export interface ShellView {
   comments?: CommentThread[];
   activeCommentThreadId?: string | null;
   commentsTabRequest?: number;
+  renameRequest?: number;
   recentProjects?: RecentProject[];
 }
 
 export interface ShellActions {
+  runShortcut?: (command: ShortcutCommand) => void;
   openProject: () => void;
   openExample?: () => void;
   openRecentProject?: (root: string) => void;

@@ -123,6 +123,14 @@ contextBridge.exposeInMainWorld("ombriqueShell", {
   onClipboardEdit: (cb: (payload: unknown) => void) => {
     ipcRenderer.on("ombrique:clipboardEdit", (_event, payload) => cb(payload));
   },
+  onCanvasShortcut: (cb: (payload: unknown) => void) => {
+    ipcRenderer.on("ombrique:canvasShortcut", (_event, payload) => cb(payload));
+  },
+  sendShortcut: (command: unknown) =>
+    ipcRenderer.send("ombrique:toCanvas", {
+      channel: "ombrique:shortcut",
+      payload: command,
+    }),
   minimizeWindow: () => {
     ipcRenderer.send("ombrique:windowControl", "minimize");
   },

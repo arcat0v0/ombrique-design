@@ -97,12 +97,33 @@ pnpm --filter @ombrique/desktop start
 
 ## 快捷键
 
+快捷键对齐 Figma 惯例，画布窗口与编辑器外壳共用同一张绑定表（`packages/editor-ui/src/shortcuts.ts`）。
+
 | 快捷键 | 功能 |
 |---|---|
+| `V` `H` `F` `R` `O` `S` `P` `T` `C` | 切换工具：选择 / 抓手 / Frame / 矩形 / 椭圆 / 星形 / 钢笔 / 文字 / 评论 |
+| `Delete` / `Backspace` | 删除当前选中的节点 |
 | `Ctrl + Z` / `Cmd + Z` | 撤销上一步编辑操作 |
 | `Ctrl + Shift + Z` / `Ctrl + Y` | 重做已撤销操作 |
 | `Ctrl + D` / `Cmd + D` | 原地复制当前选中图层 |
-| `Delete` / `Backspace` | 删除当前选中的节点 |
+| `Ctrl + C` / `Ctrl + X` / `Ctrl + V` | 复制 / 剪切 / 粘贴（偏移 20px） |
+| `Ctrl + Shift + V` | 原位粘贴 |
+| `Ctrl + A` | 全选当前页顶层图层 |
+| `Ctrl + G` / `Ctrl + Shift + G` | 编组 / 解组 |
+| `Ctrl + Shift + H` / `Ctrl + Shift + L` | 显隐切换 / 锁定切换 |
+| `Ctrl + ]` / `Ctrl + [` | 上移 / 下移一层 |
+| `Ctrl + Shift + ]` / `Ctrl + Shift + [` | 移到最上 / 最下 |
+| 方向键 / `Shift +` 方向键 | 微移 1px / 10px |
+| `Enter` / `Shift + Enter` | 进入子图层 / 返回父图层 |
+| `Tab` / `Shift + Tab` | 在同级图层间循环选择 |
+| `Esc` | 清除选区或退出当前模式 |
+| `Shift + 1` / `Shift + 2` / `Shift + 0` | 适应画布 / 缩放到选区 / 100% 缩放 |
+| `Ctrl + 0`、`Ctrl + =` / `Ctrl + -`、`=` / `-` | 100%、放大、缩小 |
+| `Shift + R` | 显隐标尺 |
+| `0` – `9` | 设置选中图层不透明度（0 = 100%） |
+| `Ctrl + R` | 重命名选中图层 |
+| `Ctrl + E` | 布尔展平 |
+| `Ctrl + Shift + K` / `Ctrl + Alt + K` / `Ctrl + Alt + B` | 插入图片 / 创建组件 / 分离实例 |
 ---
 
 ## 规范与质量保证

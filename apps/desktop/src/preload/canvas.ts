@@ -43,6 +43,7 @@ contextBridge.exposeInMainWorld("ombriqueCanvas", {
       "ombrique:navigatePage",
       "ombrique:activePage",
       "ombrique:comments",
+      "ombrique:shortcut",
     ]) {
       ipcRenderer.on(channel, (_event, payload) => cb({ channel, payload }));
     }

@@ -5,8 +5,11 @@ import type {
   SelectionSummary,
   ShellActions,
   ShellView,
+  ShortcutCommand,
   StyleRow,
+  ZOrderAction,
 } from "@ombrique/editor-ui";
+import { isCanvasShortcut } from "@ombrique/editor-ui";
 import type {
   CommentAnchor,
   CommentThread,
@@ -232,6 +235,13 @@ export interface ShellBridge {
   ) => void;
   sendPrototypeMode?: (active: boolean) => void;
   sendShowHotspots?: (show: boolean) => void;
+  sendShortcut?: (command: ShortcutCommand) => void;
+  onCanvasShortcut?: (
+    cb: (payload: {
+      command: ShortcutCommand;
+      nodes?: Array<{ file: string; path: number[] }>;
+    }) => void,
+  ) => void;
   onPrototypeModeChanged?: (cb: (active: boolean) => void) => void;
   onPageChanged?: (cb: (pageId: string) => void) => void;
 }
@@ -602,7 +612,315 @@ export function createShellState() {
     }
   }
 
+  type ShortcutNodeRef = { file: string; path: number[] };
+
+  function shortcutNodeRefs(explicit?: ShortcutNodeRef[]): ShortcutNodeRef[] {
+    if (explicit && explicit.length > 0) return explicit;
+    if (multiSelectionPaths.length > 0) return multiSelectionPaths;
+    if (selected) return [{ file: selected.ref.file, path: selected.path }];
+    return [];
+  }
+
+  async function resolveShortcutTargets(
+    explicit?: ShortcutNodeRef[],
+  ): Promise<ResolvedNode[]> {
+    if (!bridge) return [];
+    const refs = shortcutNodeRefs(explicit);
+    const resolved: ResolvedNode[] = [];
+    for (const entry of refs) {
+      const node = await bridge.resolveNode(entry.file, entry.path);
+      if (node) resolved.push(node);
+    }
+    return resolved;
+  }
+
+  function findSiblingsOf(nodes: LayerNode[], id: string): LayerNode[] | null {
+    for (const node of nodes) {
+      if (node.id === id) return nodes;
+      const nested = findSiblingsOf(node.children, id);
+      if (nested) return nested;
+    }
+    return null;
+  }
+
+  async function deleteShortcutTargets(explicit?: ShortcutNodeRef[]) {
+    const targets = await resolveShortcutTargets(explicit);
+    if (targets.length === 0) return;
+    await sendCommands([
+      { kind: "deleteNodes", targets: targets.map(toRef) },
+    ]);
+    selected = null;
+    set({ selection: null });
+  }
+
+  async function duplicateShortcutTargets(explicit?: ShortcutNodeRef[]) {
+    const targets = await resolveShortcutTargets(explicit);
+    if (targets.length === 0) return;
+    await sendCommands(
+      targets.map((node) => ({
+        kind: "duplicateNode",
+        target: toRef(node),
+        dx: 20,
+        dy: 20,
+      })),
+    );
+  }
+
+  async function groupShortcutTargets(
+    name: string,
+    explicit?: ShortcutNodeRef[],
+  ) {
+    const file = view.activePageId ? pageFileOf(view.activePageId) : null;
+    if (!file || !bridge) return;
+    const targets = await resolveShortcutTargets(explicit);
+    if (targets.length === 0) return;
+    const files = new Set(targets.map((node) => node.ref.file));
+    if (files.size > 1) {
+      set({ notice: "只能编组同一文件中的节点" });
+      return;
+    }
+    const primary =
+      targets.find(
+        (node) =>
+          selected !== null &&
+          node.ref.file === selected.ref.file &&
+          node.path.join("/") === selected.path.join("/"),
+      ) ?? targets[0];
+    if (!primary) return;
+    const parentPath =
+      primary.path.length > 1 ? primary.path.slice(0, -1) : null;
+    let parent: NodeRefInfo | null = null;
+    if (parentPath) {
+      const parentNode = await bridge.resolveNode(primary.ref.file, parentPath);
+      if (!parentNode) {
+        set({ notice: "父节点已不在当前源码中" });
+        return;
+      }
+      parent = toRef(parentNode);
+    }
+    const minIndex = targets.reduce(
+      (min, node) =>
+        Math.min(min, node.path[node.path.length - 1] ?? 0),
+      Number.POSITIVE_INFINITY,
+    );
+    await sendCommands([
+      {
+        kind: "groupNodes",
+        targets: targets.map(toRef),
+        parent,
+        pageFile: file,
+        index: Number.isFinite(minIndex) ? minIndex : 0,
+        name,
+      },
+    ]);
+  }
+
+  async function ungroupShortcutTargets(explicit?: ShortcutNodeRef[]) {
+    const targets = await resolveShortcutTargets(explicit);
+    if (targets.length === 0) return;
+    await sendCommands(
+      targets.map((node) => ({ kind: "ungroupNode", target: toRef(node) })),
+    );
+  }
+
+  async function toggleHiddenShortcutTargets(explicit?: ShortcutNodeRef[]) {
+    const targets = await resolveShortcutTargets(explicit);
+    if (targets.length === 0) return;
+    await sendCommands(
+      targets.map((node) => ({
+        kind: "setAttrs",
+        target: toRef(node),
+        attrs: { hidden: !node.hidden },
+      })),
+    );
+  }
+
+  async function toggleLockedShortcutTargets(explicit?: ShortcutNodeRef[]) {
+    const targets = await resolveShortcutTargets(explicit);
+    if (targets.length === 0) return;
+    await sendCommands(
+      targets.map((node) => ({
+        kind: "setAttrs",
+        target: toRef(node),
+        attrs: { "data-locked": node.locked ? null : "" },
+      })),
+    );
+  }
+
+  async function setOpacityShortcutTargets(
+    percent: number,
+    explicit?: ShortcutNodeRef[],
+  ) {
+    const targets = await resolveShortcutTargets(explicit);
+    if (targets.length === 0) return;
+    const value = Math.max(0, Math.min(1, percent / 100));
+    await sendCommands(
+      targets.map((node) => ({
+        kind: "setStyle",
+        target: toRef(node),
+        declarations: [["opacity", value]],
+      })),
+    );
+  }
+
+  async function zOrderShortcutTargets(
+    action: ZOrderAction,
+    explicit?: ShortcutNodeRef[],
+  ) {
+    const primary = shortcutNodeRefs(explicit)[0];
+    if (!primary || !bridge) return;
+    const node = await bridge.resolveNode(primary.file, primary.path);
+    if (!node) return;
+    const id = node.path.join("/");
+    const siblings = findSiblingsOf(view.layers, id);
+    if (!siblings || siblings.length < 2) return;
+    const index = siblings.findIndex((entry) => entry.id === id);
+    if (index < 0) return;
+    const nextIndex =
+      action === "forward"
+        ? Math.min(siblings.length - 1, index + 1)
+        : action === "backward"
+          ? Math.max(0, index - 1)
+          : action === "front"
+            ? siblings.length - 1
+            : 0;
+    if (nextIndex === index) return;
+    const parentId =
+      node.path.length > 1 ? node.path.slice(0, -1).join("/") : null;
+    let parent: NodeRefInfo | null = null;
+    if (parentId) {
+      const parentNode = await bridge.resolveNode(primary.file, parentId.split("/").map(Number));
+      if (!parentNode) return;
+      parent = toRef(parentNode);
+    }
+    await sendCommands([
+      {
+        kind: "reparent",
+        target: toRef(node),
+        parent,
+        pageFile: node.ref.file,
+        index: nextIndex,
+      },
+    ]);
+  }
+
+  async function runClipboardShortcut(
+    kind: "copy" | "cut" | "paste",
+    options: { dx?: number; dy?: number; nodes?: ShortcutNodeRef[] } = {},
+  ) {
+    const resolveNodes = async () => resolveShortcutTargets(options.nodes);
+    if (kind === "paste") {
+      const resolved = clipboard.length > 0 ? clipboard : await resolveNodes();
+      const dx = options.dx ?? 20;
+      const dy = options.dy ?? 20;
+      const commands = resolved.map((node) => ({
+        kind: "duplicateNode",
+        target: toRef(node),
+        dx,
+        dy,
+      }));
+      if (commands.length > 0) await sendCommands(commands);
+      return;
+    }
+    if (kind === "copy") {
+      clipboard = await resolveNodes();
+      return;
+    }
+    clipboard = await resolveNodes();
+    if (clipboard.length === 0) return;
+    await sendCommands([
+      { kind: "deleteNodes", targets: clipboard.map(toRef) },
+    ]);
+  }
+
+  async function executeDocumentShortcut(
+    command: ShortcutCommand,
+    nodes?: ShortcutNodeRef[],
+  ) {
+    switch (command.kind) {
+      case "undo":
+        actions.undo();
+        return;
+      case "redo":
+        actions.redo();
+        return;
+      case "delete":
+        await deleteShortcutTargets(nodes);
+        return;
+      case "duplicate":
+        await duplicateShortcutTargets(nodes);
+        return;
+      case "copy":
+        await runClipboardShortcut("copy", { nodes });
+        return;
+      case "cut":
+        await runClipboardShortcut("cut", { nodes });
+        return;
+      case "paste":
+        await runClipboardShortcut("paste", {
+          nodes,
+          dx: command.inPlace ? 0 : 20,
+          dy: command.inPlace ? 0 : 20,
+        });
+        return;
+      case "group":
+        await groupShortcutTargets("Group", nodes);
+        return;
+      case "ungroup":
+        await ungroupShortcutTargets(nodes);
+        return;
+      case "toggleHidden":
+        await toggleHiddenShortcutTargets(nodes);
+        return;
+      case "toggleLocked":
+        await toggleLockedShortcutTargets(nodes);
+        return;
+      case "zOrder":
+        await zOrderShortcutTargets(command.action, nodes);
+        return;
+      case "opacity":
+        await setOpacityShortcutTargets(command.percent, nodes);
+        return;
+      case "rename":
+        set({ renameRequest: (view.renameRequest ?? 0) + 1 });
+        return;
+      case "flatten":
+        await actions.flattenSelection?.();
+        return;
+      case "placeImage":
+        await actions.insertImage?.();
+        return;
+      case "createComponent":
+        await actions.createComponent?.(selectionComponentName());
+        return;
+      case "detachInstance":
+        await actions.detachInstance?.();
+        return;
+      case "exportSelection":
+        await actions.exportNode?.("png", 1);
+        return;
+      default:
+        return;
+    }
+  }
+
+  function selectionComponentName(): string {
+    const name = selected?.name ?? "Component";
+    return name.charAt(0).toUpperCase() + name.slice(1);
+  }
+
+  function runShortcut(command: ShortcutCommand) {
+    if (isCanvasShortcut(command)) {
+      bridge?.sendShortcut?.(command);
+      return;
+    }
+    void executeDocumentShortcut(command);
+  }
+
   const actions: ShellActionsWithTokens = {
+    runShortcut: (command) => {
+      runShortcut(command);
+    },
     openProject: () => {
       if (!bridge?.openProject) return;
       void runOpen(() => bridge.openProject(), "打开项目");
@@ -981,105 +1299,22 @@ export function createShellState() {
       ]);
     },
     toggleHidden: () => {
-      if (!selected) return;
-      void sendCommands([
-        {
-          kind: "setAttrs",
-          target: toRef(selected),
-          attrs: { hidden: !selected.hidden },
-        },
-      ]);
+      void toggleHiddenShortcutTargets();
     },
     toggleLocked: () => {
-      if (!selected) return;
-      void sendCommands([
-        {
-          kind: "setAttrs",
-          target: toRef(selected),
-          attrs: { "data-locked": selected.locked ? null : "" },
-        },
-      ]);
+      void toggleLockedShortcutTargets();
     },
     deleteSelection: () => {
-      if (!selected) return;
-      void sendCommands([{ kind: "deleteNodes", targets: [toRef(selected)] }]);
-      selected = null;
-      set({ selection: null });
+      void deleteShortcutTargets();
     },
     duplicateSelection: () => {
-      if (!selected) return;
-      void sendCommands([
-        {
-          kind: "duplicateNode",
-          target: toRef(selected),
-          dx: 20,
-          dy: 20,
-        },
-      ]);
+      void duplicateShortcutTargets();
     },
     groupSelection: (name) => {
-      const file = view.activePageId ? pageFileOf(view.activePageId) : null;
-      if (!file || !bridge || !selected) return;
-      if (multiSelectionPaths.length === 0) return;
-      void (async () => {
-        const targets: Array<{
-          file: string;
-          start: number;
-          end: number;
-          path: number[];
-        }> = [];
-        for (const entry of multiSelectionPaths) {
-          const node = await bridge.resolveNode(entry.file, entry.path);
-          if (!node) {
-            set({ notice: "该节点已不在当前源码中" });
-            return;
-          }
-          targets.push(toRef(node));
-        }
-        const files = new Set(targets.map((target) => target.file));
-        if (files.size > 1) {
-          set({ notice: "只能编组同一文件中的节点" });
-          return;
-        }
-        const primary = targets.find(
-          (target) => target.path.join("/") === selected?.path.join("/"),
-        );
-        const parentPath =
-          primary && primary.path.length > 1 ? primary.path.slice(0, -1) : null;
-        let parent: {
-          file: string;
-          start: number;
-          end: number;
-          path: number[];
-        } | null = null;
-        if (parentPath) {
-          const parentNode = await bridge.resolveNode(file, parentPath);
-          if (!parentNode) {
-            set({ notice: "父节点已不在当前源码中" });
-            return;
-          }
-          parent = toRef(parentNode);
-        }
-        const minIndex = targets.reduce(
-          (min, target) =>
-            Math.min(min, target.path[target.path.length - 1] ?? 0),
-          Number.POSITIVE_INFINITY,
-        );
-        await sendCommands([
-          {
-            kind: "groupNodes",
-            targets,
-            parent,
-            pageFile: file,
-            index: Number.isFinite(minIndex) ? minIndex : 0,
-            name,
-          },
-        ]);
-      })();
+      void groupShortcutTargets(name);
     },
     ungroupSelection: () => {
-      if (!selected) return;
-      void sendCommands([{ kind: "ungroupNode", target: toRef(selected) }]);
+      void ungroupShortcutTargets();
     },
     createNode: (kind) => {
       if (kind === "pen") {
@@ -1899,51 +2134,18 @@ export function createShellState() {
         kind?: "copy" | "cut" | "paste";
         dx?: number;
         dy?: number;
-        nodes?: Array<{ file: string; path: number[] }>;
+        nodes?: ShortcutNodeRef[];
       };
-      if (!clip?.kind || !Array.isArray(clip.nodes)) return;
-      const resolveNodes = async () => {
-        const resolved: ResolvedNode[] = [];
-        for (const entry of clip.nodes ?? []) {
-          const node = await bridge.resolveNode(entry.file, entry.path);
-          if (node) resolved.push(node);
-        }
-        return resolved;
-      };
-      if (clip.kind === "paste") {
-        void (async () => {
-          const resolved =
-            clipboard.length > 0 ? clipboard : await resolveNodes();
-          const dx = clip.dx ?? 20;
-          const dy = clip.dy ?? 20;
-          const commands: unknown[] = [];
-          for (const node of resolved) {
-            commands.push({
-              kind: "duplicateNode",
-              target: toRef(node),
-              dx,
-              dy,
-            });
-          }
-          if (commands.length > 0) void sendCommands(commands);
-        })();
-        return;
-      }
-      if (clip.kind === "copy") {
-        void resolveNodes().then((nodes) => {
-          clipboard = nodes;
-        });
-        return;
-      }
-      if (clip.kind === "cut") {
-        void (async () => {
-          clipboard = await resolveNodes();
-          if (clipboard.length === 0) return;
-          await sendCommands([
-            { kind: "deleteNodes", targets: clipboard.map(toRef) },
-          ]);
-        })();
-      }
+      if (!clip?.kind) return;
+      void runClipboardShortcut(clip.kind, {
+        dx: clip.dx,
+        dy: clip.dy,
+        nodes: Array.isArray(clip.nodes) ? clip.nodes : undefined,
+      });
+    });
+    bridge.onCanvasShortcut?.((payload) => {
+      if (!payload?.command) return;
+      void executeDocumentShortcut(payload.command, payload.nodes);
     });
     bridge.onPrototypeModeChanged?.((active) => {
       set({ prototypeMode: Boolean(active) });

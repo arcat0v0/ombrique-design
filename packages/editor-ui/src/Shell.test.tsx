@@ -69,16 +69,9 @@ describe("Shell", () => {
     expect(getByLabelText("关闭通知")).toBeDefined();
   });
 
-  it("routes keyboard shortcuts for editing, history, and grouping", () => {
-    const undo = vi.fn();
-    const redo = vi.fn();
-    const duplicateSelection = vi.fn();
-    const deleteSelection = vi.fn();
+  it("routes keyboard shortcuts through runShortcut", () => {
+    const runShortcut = vi.fn();
     const groupSelection = vi.fn();
-    const ungroupSelection = vi.fn();
-    const toggleHidden = vi.fn();
-    const toggleLocked = vi.fn();
-    const zoomToFit = vi.fn();
 
     render(
       <Shell
@@ -94,15 +87,8 @@ describe("Shell", () => {
           },
         })}
         actions={makeActions({
-          undo,
-          redo,
-          duplicateSelection,
-          deleteSelection,
+          runShortcut,
           groupSelection,
-          ungroupSelection,
-          toggleHidden,
-          toggleLocked,
-          zoomToFit,
         })}
       />,
     );
@@ -110,7 +96,7 @@ describe("Shell", () => {
     window.dispatchEvent(
       new KeyboardEvent("keydown", { key: "z", ctrlKey: true }),
     );
-    expect(undo).toHaveBeenCalledTimes(1);
+    expect(runShortcut).toHaveBeenCalledWith({ kind: "undo" });
 
     window.dispatchEvent(
       new KeyboardEvent("keydown", {
@@ -119,15 +105,15 @@ describe("Shell", () => {
         shiftKey: true,
       }),
     );
-    expect(redo).toHaveBeenCalledTimes(1);
+    expect(runShortcut).toHaveBeenCalledWith({ kind: "redo" });
 
     window.dispatchEvent(
       new KeyboardEvent("keydown", { key: "d", ctrlKey: true }),
     );
-    expect(duplicateSelection).toHaveBeenCalledTimes(1);
+    expect(runShortcut).toHaveBeenCalledWith({ kind: "duplicate" });
 
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Delete" }));
-    expect(deleteSelection).toHaveBeenCalledTimes(1);
+    expect(runShortcut).toHaveBeenCalledWith({ kind: "delete" });
 
     window.dispatchEvent(
       new KeyboardEvent("keydown", { key: "g", metaKey: true }),
@@ -137,22 +123,22 @@ describe("Shell", () => {
     window.dispatchEvent(
       new KeyboardEvent("keydown", { key: "g", metaKey: true, shiftKey: true }),
     );
-    expect(ungroupSelection).toHaveBeenCalledTimes(1);
+    expect(runShortcut).toHaveBeenCalledWith({ kind: "ungroup" });
 
     window.dispatchEvent(
       new KeyboardEvent("keydown", { key: "h", ctrlKey: true, shiftKey: true }),
     );
-    expect(toggleHidden).toHaveBeenCalledTimes(1);
+    expect(runShortcut).toHaveBeenCalledWith({ kind: "toggleHidden" });
 
     window.dispatchEvent(
       new KeyboardEvent("keydown", { key: "l", ctrlKey: true, shiftKey: true }),
     );
-    expect(toggleLocked).toHaveBeenCalledTimes(1);
+    expect(runShortcut).toHaveBeenCalledWith({ kind: "toggleLocked" });
 
     window.dispatchEvent(
       new KeyboardEvent("keydown", { key: "1", shiftKey: true }),
     );
-    expect(zoomToFit).toHaveBeenCalledTimes(1);
+    expect(runShortcut).toHaveBeenCalledWith({ kind: "zoom", action: "fit" });
   });
 
   it("ignores shortcuts while typing in an input", () => {

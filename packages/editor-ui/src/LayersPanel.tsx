@@ -19,6 +19,7 @@ import {
   type DragEvent,
   type KeyboardEvent,
   type MouseEvent,
+  useEffect,
   useMemo,
   useState,
 } from "react";
@@ -57,6 +58,8 @@ export interface LayersPanelProps {
     targetId: string,
     position: "before" | "after",
   ) => void;
+  renameLayerId?: string | null;
+  onRenameHandled?: () => void;
 }
 
 function layerIcon(kind: LayerNode["kind"]) {
@@ -82,6 +85,15 @@ function isContainerNode(node: LayerNode): boolean {
     node.tag.toLowerCase() === "group" ||
     node.tag.toLowerCase() === "section"
   );
+}
+
+function findLayerById(nodes: LayerNode[], id: string): LayerNode | null {
+  for (const node of nodes) {
+    if (node.id === id) return node;
+    const nested = findLayerById(node.children, id);
+    if (nested) return nested;
+  }
+  return null;
 }
 
 function filterNode(node: LayerNode, query: string): LayerNode | null {
@@ -114,6 +126,8 @@ export function LayersPanel({
   onDeleteSelection,
   onReparentLayer,
   onReorderLayer,
+  renameLayerId,
+  onRenameHandled,
 }: LayersPanelProps) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -287,6 +301,17 @@ export function LayersPanel({
     setEditingId(node.id);
     setEditingName(node.name);
   };
+
+  useEffect(() => {
+    if (!renameLayerId) return;
+    const node = findLayerById(layers, renameLayerId);
+    if (node) {
+      onSelectLayer(node.id);
+      setEditingId(node.id);
+      setEditingName(node.name);
+    }
+    onRenameHandled?.();
+  }, [renameLayerId, layers, onSelectLayer, onRenameHandled]);
 
   const commitRename = (node: LayerNode) => {
     const trimmed = editingName.trim();

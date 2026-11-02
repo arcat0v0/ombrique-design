@@ -29,3 +29,16 @@ export type {
   TokenItem,
   TokenModeItem,
 } from "./types";
+export {
+  SHORTCUT_BINDINGS,
+  isCanvasShortcut,
+  isTypingTarget,
+  resolveShortcut,
+} from "./shortcuts";
+export type {
+  ShortcutCommand,
+  ShortcutContext,
+  ShortcutKeyEvent,
+  ZoomAction,
+  ZOrderAction,
+} from "./shortcuts";

@@ -29,6 +29,7 @@ import { VersionHistoryPanel } from "./VersionHistoryPanel";
 import { CommentsPanel } from "./CommentsPanel";
 import { Toolbar } from "./Toolbar";
 import { WindowControls } from "./WindowControls";
+import { isTypingTarget, resolveShortcut } from "./shortcuts";
 import type { ShellActions, ShellView } from "./types";
 import { Workspace } from "./Workspace";
 import "./theme.css";
@@ -96,6 +97,7 @@ function EditorShell({
   const [leftTab, setLeftTab] = useState<
     "layers" | "assets" | "tokens" | "history" | "comments"
   >("layers");
+  const [renameLayerId, setRenameLayerId] = useState<string | null>(null);
   const activeTool = view.activeTool ?? "select";
 
   const handleGroup = useCallback(() => {
@@ -118,84 +120,21 @@ function EditorShell({
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (
-        target &&
-        (target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA" ||
-          target.isContentEditable)
-      ) {
+      if (isTypingTarget(event.target as HTMLElement | null)) return;
+      const command = resolveShortcut(event, {
+        hasSelection: Boolean(view.selection),
+      });
+      if (!command) return;
+      event.preventDefault();
+      if (command.kind === "group") {
+        handleGroup();
         return;
       }
-      const mod = event.metaKey || event.ctrlKey;
-      const key = event.key.toLowerCase();
-      if (mod && (key === "z" || key === "y")) {
-        event.preventDefault();
-        if (key === "y" || event.shiftKey) {
-          actions.redo();
-        } else {
-          actions.undo();
-        }
-        return;
-      }
-      if (mod && event.key.toLowerCase() === "d") {
-        event.preventDefault();
-        actions.duplicateSelection();
-        return;
-      }
-      if (mod && event.key.toLowerCase() === "g") {
-        event.preventDefault();
-        if (event.shiftKey) {
-          actions.ungroupSelection();
-        } else {
-          handleGroup();
-        }
-        return;
-      }
-      if (mod && event.shiftKey && key === "h") {
-        event.preventDefault();
-        actions.toggleHidden();
-        return;
-      }
-      if (mod && event.shiftKey && key === "l") {
-        event.preventDefault();
-        actions.toggleLocked();
-        return;
-      }
-      if (event.shiftKey && event.key === "1") {
-        event.preventDefault();
-        actions.zoomToFit();
-        return;
-      }
-      if ((mod && key === "0") || (event.shiftKey && event.key === "0")) {
-        event.preventDefault();
-        actions.zoomTo(1);
-        return;
-      }
-      if (mod && (key === "=" || key === "+")) {
-        event.preventDefault();
-        actions.zoomTo(view.zoom * 1.25);
-        return;
-      }
-      if (mod && (key === "-" || key === "_")) {
-        event.preventDefault();
-        actions.zoomTo(view.zoom * 0.8);
-        return;
-      }
-      if (!mod && key === "c") {
-        event.preventDefault();
-        actions.setTool?.("comment");
-        setLeftTab("comments");
-        return;
-      }
-      if (event.key === "Backspace" || event.key === "Delete") {
-        event.preventDefault();
-        actions.deleteSelection();
-      }
+      actions.runShortcut?.(command);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [actions, handleGroup]);
+  }, [actions, handleGroup, view.selection]);
 
   useEffect(() => {
     if (!actions.updateCanvasBounds || !canvasMountRef.current) return;
@@ -234,6 +173,16 @@ function EditorShell({
   useEffect(() => {
     if (view.commentsTabRequest) setLeftTab("comments");
   }, [view.commentsTabRequest]);
+
+  useEffect(() => {
+    if (view.activeTool === "comment") setLeftTab("comments");
+  }, [view.activeTool]);
+
+  useEffect(() => {
+    if (!view.renameRequest) return;
+    setLeftTab("layers");
+    if (view.selection?.id) setRenameLayerId(view.selection.id);
+  }, [view.renameRequest, view.selection]);
   return (
     <TooltipProvider delayDuration={200}>
       <div className="shell flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
@@ -448,6 +397,8 @@ function EditorShell({
                   onDeleteSelection={actions.deleteSelection}
                   onReparentLayer={actions.reparentLayer}
                   onReorderLayer={actions.reorderLayer}
+                  renameLayerId={renameLayerId}
+                  onRenameHandled={() => setRenameLayerId(null)}
                 />
               ) : leftTab === "assets" ? (
                 <AssetsPanel
