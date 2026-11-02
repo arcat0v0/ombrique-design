@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "aoci": {
+      "command": "/home/arcat/.local/bin/aoci",
+      "args": [
+        "--repo",
+        "/home/arcat/Develop/ombrique/ombrique-design",
+        "mcp"
+      ]
+    }
+  }
+}
