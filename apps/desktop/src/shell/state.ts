@@ -214,6 +214,7 @@ export interface ShellBridge {
     width: number;
     height: number;
   }) => void;
+  setCanvasOverlay?: (active: boolean) => void;
   reloadCanvas?: () => Promise<boolean>;
   onToolChanged?: (cb: (tool: CanvasTool) => void) => void;
   minimizeWindow?: () => void;
@@ -1511,6 +1512,9 @@ export function createShellState() {
     },
     updateCanvasBounds: (bounds) => {
       bridge?.updateCanvasBounds?.(bounds);
+    },
+    setCanvasOverlayActive: (active) => {
+      bridge?.setCanvasOverlay?.(active);
     },
     setTool: (tool) => {
       set({ activeTool: tool });

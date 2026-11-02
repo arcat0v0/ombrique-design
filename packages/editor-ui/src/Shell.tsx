@@ -180,6 +180,34 @@ function EditorShell({ view, actions }: ShellProps) {
   }, [actions.updateCanvasBounds]);
 
   useEffect(() => {
+    const selector = [
+      '[role="menu"][data-state="open"]',
+      '[role="dialog"][data-state="open"]',
+      '[role="alertdialog"][data-state="open"]',
+      '[role="listbox"][data-state="open"]',
+    ].join(",");
+    let active = false;
+    const sync = () => {
+      const next = Boolean(document.querySelector(selector));
+      if (next === active) return;
+      active = next;
+      actions.setCanvasOverlayActive?.(next);
+    };
+    const observer = new MutationObserver(sync);
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["data-state"],
+    });
+    sync();
+    return () => {
+      observer.disconnect();
+      if (active) actions.setCanvasOverlayActive?.(false);
+    };
+  }, [actions.setCanvasOverlayActive]);
+
+  useEffect(() => {
     if (view.commentsTabRequest) setLeftTab("comments");
   }, [view.commentsTabRequest]);
   return (

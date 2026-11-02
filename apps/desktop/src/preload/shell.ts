@@ -154,6 +154,9 @@ contextBridge.exposeInMainWorld("ombriqueShell", {
   }) => {
     ipcRenderer.send("ombrique:canvasBounds", bounds);
   },
+  setCanvasOverlay: (active: boolean) => {
+    ipcRenderer.send("ombrique:canvasOverlay", active);
+  },
   onStats: (cb: (stats: unknown) => void) => {
     ipcRenderer.on("ombrique:stats", (_event, stats) => cb(stats));
   },
