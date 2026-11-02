@@ -7,6 +7,7 @@ import type {
   GitCommit,
   GitStatus,
   Manifest,
+  RecentProject,
 } from "@ombrique/protocol";
 
 export interface LayerNode {
@@ -138,11 +139,16 @@ export interface ShellView {
   comments?: CommentThread[];
   activeCommentThreadId?: string | null;
   commentsTabRequest?: number;
+  recentProjects?: RecentProject[];
 }
 
 export interface ShellActions {
   openProject: () => void;
   openExample?: () => void;
+  openRecentProject?: (root: string) => void;
+  createProject?: () => void;
+  removeRecentProject?: (root: string) => void;
+  showWorkspace?: () => void;
   selectPage: (pageId: string) => void;
   selectLayer: (layerId: string) => void;
   setStyle: (

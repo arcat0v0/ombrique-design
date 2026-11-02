@@ -427,3 +427,12 @@ export const gitStatusSchema = z.object({
   changedFiles: z.array(z.string()),
 });
 export type GitStatus = z.infer<typeof gitStatusSchema>;
+
+export interface RecentProject {
+  root: string;
+  name: string;
+  lastOpenedAt: string;
+  pageCount?: number;
+  exists: boolean;
+  thumbnail?: string | null;
+}

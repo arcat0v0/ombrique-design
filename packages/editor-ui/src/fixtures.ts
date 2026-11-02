@@ -38,7 +38,7 @@ export function makeSelection(
 
 export function makeView(overrides: Partial<ShellView> = {}): ShellView {
   return {
-    projectRoot: null,
+    projectRoot: "/tmp/ombrique-fixture",
     manifest: null,
     pages: [],
     activePageId: null,

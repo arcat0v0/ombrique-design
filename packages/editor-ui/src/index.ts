@@ -1,5 +1,7 @@
 export { Shell } from "./Shell";
 export type { ShellProps } from "./Shell";
+export { Workspace, formatRelativeTime } from "./Workspace";
+export type { WorkspaceProps } from "./Workspace";
 export { AssetsPanel } from "./AssetsPanel";
 export type { AssetsPanelProps } from "./AssetsPanel";
 export { FloatingToolSwitcher } from "./FloatingToolSwitcher";

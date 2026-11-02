@@ -3379,6 +3379,7 @@ async function init() {
     selection = null;
     multiSelection = [];
     drawOverlay();
+    firstMount = true;
     const first = message.manifest.pages[0];
     if (first) void mountPage(first.file);
     bridge?.send("ombrique:ready", true);
@@ -3701,6 +3702,8 @@ async function init() {
       manifest.pages[0];
     if (active) void mountPage(active.file);
   });
+
+  bridge?.send("ombrique:canvasReady", true);
 }
 
 void init();

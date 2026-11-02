@@ -6,6 +6,21 @@ import { Shell } from "./Shell";
 afterEach(cleanup);
 
 describe("Shell", () => {
+  it("shows the workspace when no project is open", () => {
+    const onCreateProject = vi.fn();
+    const { getAllByText, getByText, queryByLabelText } = render(
+      <Shell
+        view={makeView({ projectRoot: null })}
+        actions={makeActions({ createProject: onCreateProject })}
+      />,
+    );
+    expect(getByText("继续你的设计")).toBeDefined();
+    const createButton = getAllByText("新建项目")[0];
+    if (createButton) fireEvent.click(createButton);
+    expect(onCreateProject).toHaveBeenCalledTimes(1);
+    expect(queryByLabelText("撤销")).toBeNull();
+  });
+
   it("shows diagnostics count and notice from the view", () => {
     const { getByText, getByLabelText } = render(
       <Shell

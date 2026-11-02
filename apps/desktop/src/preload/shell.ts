@@ -59,6 +59,16 @@ contextBridge.exposeInMainWorld("ombriqueShell", {
     }),
   importImage: () => ipcRenderer.invoke("ombrique:importImage"),
   openExample: () => ipcRenderer.invoke("ombrique:openExample"),
+  createProject: () => ipcRenderer.invoke("ombrique:createProject"),
+  listRecentProjects: () => ipcRenderer.invoke("ombrique:listRecentProjects"),
+  removeRecentProject: (root: string) =>
+    ipcRenderer.invoke("ombrique:removeRecentProject", root),
+  showWorkspace: () => ipcRenderer.invoke("ombrique:showWorkspace"),
+  onRecentProjects: (cb: (projects: unknown) => void) => {
+    ipcRenderer.on("ombrique:recentProjects", (_event, projects) =>
+      cb(projects),
+    );
+  },
   zoomTo: (factor: number) =>
     ipcRenderer.send("ombrique:toCanvas", {
       channel: "ombrique:zoom",

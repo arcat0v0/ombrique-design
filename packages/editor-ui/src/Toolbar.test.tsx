@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Toolbar } from "./Toolbar";
 
@@ -9,7 +9,6 @@ function renderToolbar(overrides: Partial<Parameters<typeof Toolbar>[0]> = {}) {
     onOpenProject: vi.fn(),
     onUndo: vi.fn(),
     onRedo: vi.fn(),
-    onCreateNode: vi.fn(),
     onZoomToFit: vi.fn(),
     onExport: vi.fn(),
   };
@@ -47,7 +46,6 @@ describe("Toolbar", () => {
         onOpenProject={() => {}}
         onUndo={callbacks.onUndo}
         onRedo={callbacks.onRedo}
-        onCreateNode={() => {}}
         onZoomToFit={() => {}}
         onExport={() => {}}
       />,
@@ -60,32 +58,31 @@ describe("Toolbar", () => {
     expect(callbacks.onRedo).toHaveBeenCalledTimes(1);
   });
 
-  it("disables all buttons while busy", () => {
+  it("disables actions while busy", () => {
     const { getByLabelText } = renderToolbar({ busy: true, canUndo: true });
-    expect((getByLabelText("打开项目") as HTMLButtonElement).disabled).toBe(
-      true,
-    );
     expect((getByLabelText("撤销") as HTMLButtonElement).disabled).toBe(true);
-    expect((getByLabelText("插入Frame") as HTMLButtonElement).disabled).toBe(
+    expect((getByLabelText("导出") as HTMLButtonElement).disabled).toBe(true);
+    expect((getByLabelText("创建组件") as HTMLButtonElement).disabled).toBe(
       true,
     );
   });
 
-  it("calls onCreateNode with the right kind for each insert tool", () => {
-    const { getByLabelText, callbacks } = renderToolbar();
-    const cases: Array<[string, string]> = [
-      ["插入Frame", "frame"],
-      ["插入矩形", "rect"],
-      ["椭圆", "ellipse"],
-      ["星形", "star"],
-      ["文字", "text"],
-    ];
-    for (const [label, kind] of cases) {
-      const btn = getByLabelText(new RegExp(label));
-      btn.click();
-      expect(callbacks.onCreateNode).toHaveBeenCalledWith(kind);
-    }
-    expect(callbacks.onCreateNode).toHaveBeenCalledTimes(5);
+  it("no longer renders the inline insert tool row", () => {
+    const { queryByLabelText, queryByText } = renderToolbar();
+    expect(queryByLabelText("插入Frame")).toBeNull();
+    expect(queryByLabelText("插入矩形")).toBeNull();
+    expect(queryByText("打开项目")).toBeNull();
+  });
+
+  it("shows the current project and returns to the workspace", () => {
+    const onShowWorkspace = vi.fn();
+    const { getByLabelText, getByText } = renderToolbar({
+      projectName: "pricing-redesign",
+      onShowWorkspace,
+    });
+    expect(getByText("pricing-redesign")).toBeDefined();
+    fireEvent.click(getByLabelText("返回工作区"));
+    expect(onShowWorkspace).toHaveBeenCalledTimes(1);
   });
 
   it("displays zoom as a percentage, stats, and fits on demand", () => {
@@ -131,7 +128,6 @@ describe("Toolbar", () => {
         onOpenProject={() => {}}
         onUndo={() => {}}
         onRedo={() => {}}
-        onCreateNode={() => {}}
         onZoomToFit={() => {}}
         onExport={() => {}}
       />,
@@ -173,7 +169,6 @@ describe("Toolbar", () => {
         onOpenProject={() => {}}
         onUndo={() => {}}
         onRedo={() => {}}
-        onCreateNode={() => {}}
         onZoomToFit={() => {}}
         onExport={() => {}}
       />,
@@ -191,27 +186,53 @@ describe("Toolbar", () => {
     expect(onCreateComponent).toHaveBeenCalledWith("CardItem");
   });
 
-  it("supports open and export project menu items", async () => {
+  it("merges project actions and recent projects into the Ombrique menu", async () => {
     const onOpenProject = vi.fn();
     const onOpenBundle = vi.fn();
+    const onCreateProject = vi.fn();
+    const onOpenRecentProject = vi.fn();
     const onExport = vi.fn();
     const onBundleProject = vi.fn();
 
-    const { getByLabelText, findByText } = renderToolbar({
+    const { getByLabelText, findByText, baseElement } = renderToolbar({
+      recentProjects: [
+        {
+          root: "/work/pricing-redesign",
+          name: "pricing-redesign",
+          lastOpenedAt: new Date().toISOString(),
+          exists: true,
+          thumbnail: null,
+        },
+      ],
       onOpenProject,
+      onCreateProject,
       onOpenBundle,
+      onOpenRecentProject,
       onExport,
       onBundleProject,
     });
 
-    const openMenuBtn = getByLabelText("打开项目");
-    fireEvent.pointerDown(openMenuBtn, { button: 0 });
-    fireEvent.click(await findByText("打开本地项目目录"));
+    const brand = getByLabelText("Ombrique 应用菜单");
+    fireEvent.keyDown(brand, { key: "Enter" });
+    const menu = await within(baseElement).findByRole("menu");
+
+    expect(within(menu).getByText("新建项目")).toBeDefined();
+    fireEvent.click(within(menu).getByText("新建项目"));
+    expect(onCreateProject).toHaveBeenCalledTimes(1);
+
+    fireEvent.keyDown(brand, { key: "Enter" });
+    const openMenu = await within(baseElement).findByRole("menu");
+    fireEvent.click(within(openMenu).getByText("打开本地项目"));
     expect(onOpenProject).toHaveBeenCalledTimes(1);
 
-    fireEvent.pointerDown(openMenuBtn, { button: 0 });
-    fireEvent.click(await findByText("打开 .ombrique 安装包"));
-    expect(onOpenBundle).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(brand, { key: "Enter" });
+    const recentMenu = await within(baseElement).findByRole("menu");
+    const recentItems = within(recentMenu).getAllByRole("menuitem");
+    const recentItem = recentItems.find((item) =>
+      item.textContent?.includes("pricing-redesign"),
+    );
+    if (recentItem) fireEvent.click(recentItem);
+    expect(onOpenRecentProject).toHaveBeenCalledWith("/work/pricing-redesign");
 
     const exportMenuBtn = getByLabelText("导出");
     fireEvent.pointerDown(exportMenuBtn, { button: 0 });
@@ -253,7 +274,6 @@ describe("Toolbar", () => {
         onOpenProject={() => {}}
         onUndo={() => {}}
         onRedo={() => {}}
-        onCreateNode={() => {}}
         onZoomToFit={() => {}}
         onExport={() => {}}
         prototypeMode={true}

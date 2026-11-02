@@ -12,7 +12,12 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { DiagnosticsBar } from "./DiagnosticsBar";
 import { LayersPanel } from "./LayersPanel";
@@ -24,13 +29,47 @@ import { VersionHistoryPanel } from "./VersionHistoryPanel";
 import { CommentsPanel } from "./CommentsPanel";
 import { Toolbar } from "./Toolbar";
 import type { ShellActions, ShellView } from "./types";
+import { Workspace } from "./Workspace";
 import "./theme.css";
+
 export interface ShellProps {
   view: ShellView;
   actions: ShellActions;
 }
 
+function projectNameOf(root: string | null): string | undefined {
+  if (!root) return undefined;
+  const parts = root.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] ?? root;
+}
+
 export function Shell({ view, actions }: ShellProps) {
+  if (!view.projectRoot) {
+    return (
+      <Workspace
+        recentProjects={view.recentProjects}
+        busy={view.busy}
+        notice={view.notice}
+        onOpenRecent={(root) => actions.openRecentProject?.(root)}
+        onOpenProject={actions.openProject}
+        onCreateProject={() => actions.createProject?.()}
+        onOpenBundle={
+          actions.openBundle
+            ? () => {
+                void actions.openBundle?.();
+              }
+            : undefined
+        }
+        onOpenExample={actions.openExample}
+        onRemoveRecent={actions.removeRecentProject}
+        onDismissNotice={actions.dismissNotice}
+      />
+    );
+  }
+  return <EditorShell view={view} actions={actions} />;
+}
+
+function EditorShell({ view, actions }: ShellProps) {
   const canvasMountRef = useRef<HTMLDivElement>(null);
   const [leftTab, setLeftTab] = useState<
     "layers" | "assets" | "tokens" | "history" | "comments"
@@ -190,15 +229,18 @@ export function Shell({ view, actions }: ShellProps) {
                 onGroupSelection={handleGroup}
                 onUngroupSelection={actions.ungroupSelection}
                 onFlattenSelection={actions.flattenSelection}
-                onInsertImage={actions.insertImage}
+                projectName={projectNameOf(view.projectRoot)}
+                recentProjects={view.recentProjects}
                 onOpenProject={actions.openProject}
+                onCreateProject={actions.createProject}
                 onOpenExample={actions.openExample}
                 onOpenBundle={actions.openBundle}
+                onOpenRecentProject={actions.openRecentProject}
+                onShowWorkspace={actions.showWorkspace}
                 onBundleProject={actions.bundleProject}
                 onUndo={actions.undo}
                 onRedo={actions.redo}
                 onDeleteSelection={actions.deleteSelection}
-                onCreateNode={actions.createNode}
                 onZoomTo={actions.zoomTo}
                 onZoomToFit={actions.zoomToFit}
                 onExport={actions.exportPage}
@@ -239,7 +281,7 @@ export function Shell({ view, actions }: ShellProps) {
               <div
                 role="tablist"
                 aria-label="左侧面板标签"
-                className="flex items-center border-t border-b border-border bg-muted/30 px-2 py-0.5 gap-1 select-none"
+                className="flex items-center gap-0.5 border-t border-b border-border bg-muted/30 px-1.5 py-0.5 select-none"
                 onKeyDown={(e) => {
                   if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
                     e.preventDefault();
@@ -254,96 +296,91 @@ export function Shell({ view, actions }: ShellProps) {
                   }
                 }}
               >
-                <Button
-                  type="button"
-                  role="tab"
-                  aria-selected={leftTab === "layers"}
-                  variant={leftTab === "layers" ? "secondary" : "ghost"}
-                  size="xs"
-                  onClick={() => setLeftTab("layers")}
-                  className="h-6 gap-1 px-2 text-[11px] font-normal"
-                  aria-label="查看图层列表"
-                >
-                  <LayersIcon className="size-3 text-muted-foreground" />
-                  <span>图层</span>
-                  {view.layers.length > 0 && (
-                    <span className="text-[10px] text-muted-foreground/70 font-mono">
-                      {view.layers.length}
-                    </span>
-                  )}
-                </Button>
-                <Button
-                  type="button"
-                  role="tab"
-                  aria-selected={leftTab === "assets"}
-                  variant={leftTab === "assets" ? "secondary" : "ghost"}
-                  size="xs"
-                  onClick={() => setLeftTab("assets")}
-                  className="h-6 gap-1 px-2 text-[11px] font-normal"
-                  aria-label="查看组件资产"
-                >
-                  <ComponentIcon className="size-3 text-muted-foreground" />
-                  <span>资产</span>
-                  {view.components && view.components.length > 0 && (
-                    <span className="text-[10px] text-muted-foreground/70 font-mono">
-                      {view.components.length}
-                    </span>
-                  )}
-                </Button>
-                <Button
-                  type="button"
-                  role="tab"
-                  aria-selected={leftTab === "tokens"}
-                  variant={leftTab === "tokens" ? "secondary" : "ghost"}
-                  size="xs"
-                  onClick={() => setLeftTab("tokens")}
-                  className="h-6 gap-1 px-2 text-[11px] font-normal"
-                  aria-label="查看设计变量"
-                >
-                  <CoinsIcon className="size-3 text-muted-foreground" />
-                  <span>变量</span>
-                  {view.tokens && view.tokens.length > 0 && (
-                    <span className="text-[10px] text-muted-foreground/70 font-mono">
-                      {view.tokens.length}
-                    </span>
-                  )}
-                </Button>
-                <Button
-                  type="button"
-                  role="tab"
-                  aria-selected={leftTab === "history"}
-                  variant={leftTab === "history" ? "secondary" : "ghost"}
-                  size="xs"
-                  onClick={() => setLeftTab("history")}
-                  className="h-6 gap-1 px-2 text-[11px] font-normal"
-                  aria-label="查看版本历史"
-                >
-                  <HistoryIcon className="size-3 text-muted-foreground" />
-                  <span>历史</span>
-                  {view.history && view.history.length > 0 && (
-                    <span className="text-[10px] text-muted-foreground/70 font-mono">
-                      {view.history.length}
-                    </span>
-                  )}
-                </Button>
-                <Button
-                  type="button"
-                  role="tab"
-                  aria-selected={leftTab === "comments"}
-                  variant={leftTab === "comments" ? "secondary" : "ghost"}
-                  size="xs"
-                  onClick={() => setLeftTab("comments")}
-                  className="h-6 gap-1 px-2 text-[11px] font-normal"
-                  aria-label="查看评论讨论"
-                >
-                  <MessageSquareIcon className="size-3 text-muted-foreground" />
-                  <span>评论</span>
-                  {view.comments && view.comments.length > 0 && (
-                    <span className="text-[10px] text-muted-foreground/70 font-mono">
-                      {view.comments.filter((c) => !c.resolved).length}
-                    </span>
-                  )}
-                </Button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      role="tab"
+                      aria-selected={leftTab === "layers"}
+                      variant={leftTab === "layers" ? "secondary" : "ghost"}
+                      size="xs"
+                      onClick={() => setLeftTab("layers")}
+                      className="size-7 shrink-0 p-0"
+                      aria-label="查看图层列表"
+                    >
+                      <LayersIcon className="size-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">图层</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      role="tab"
+                      aria-selected={leftTab === "assets"}
+                      variant={leftTab === "assets" ? "secondary" : "ghost"}
+                      size="xs"
+                      onClick={() => setLeftTab("assets")}
+                      className="size-7 shrink-0 p-0"
+                      aria-label="查看组件资产"
+                    >
+                      <ComponentIcon className="size-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">资产</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      role="tab"
+                      aria-selected={leftTab === "tokens"}
+                      variant={leftTab === "tokens" ? "secondary" : "ghost"}
+                      size="xs"
+                      onClick={() => setLeftTab("tokens")}
+                      className="size-7 shrink-0 p-0"
+                      aria-label="查看设计变量"
+                    >
+                      <CoinsIcon className="size-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">变量</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      role="tab"
+                      aria-selected={leftTab === "history"}
+                      variant={leftTab === "history" ? "secondary" : "ghost"}
+                      size="xs"
+                      onClick={() => setLeftTab("history")}
+                      className="size-7 shrink-0 p-0"
+                      aria-label="查看版本历史"
+                    >
+                      <HistoryIcon className="size-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">历史</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      role="tab"
+                      aria-selected={leftTab === "comments"}
+                      variant={leftTab === "comments" ? "secondary" : "ghost"}
+                      size="xs"
+                      onClick={() => setLeftTab("comments")}
+                      className="size-7 shrink-0 p-0"
+                      aria-label="查看评论讨论"
+                    >
+                      <MessageSquareIcon className="size-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">评论</TooltipContent>
+                </Tooltip>
               </div>
 
               {leftTab === "layers" ? (

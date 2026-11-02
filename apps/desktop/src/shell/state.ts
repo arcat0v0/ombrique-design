@@ -18,6 +18,7 @@ import type {
   GitCommit,
   GitStatus,
   Manifest,
+  RecentProject,
   TokenItem,
   TokenModeItem,
 } from "@ombrique/protocol";
@@ -120,6 +121,16 @@ export interface ShellBridge {
   tree: (file: string) => Promise<LayerNode[]>;
   versions: () => Promise<Record<string, string>>;
   openExample: () => Promise<string | null>;
+  createProject?: () => Promise<{
+    ok: boolean;
+    root?: string;
+    error?: string;
+    canceled?: boolean;
+  }>;
+  listRecentProjects?: () => Promise<RecentProject[]>;
+  removeRecentProject?: (root: string) => Promise<RecentProject[]>;
+  showWorkspace?: () => Promise<boolean>;
+  onRecentProjects?: (cb: (projects: RecentProject[]) => void) => void;
   listTokens?: () => Promise<
     Array<{
       name: string;
@@ -475,6 +486,16 @@ export function createShellState() {
     set({ layers });
   }
 
+  async function refreshRecentProjects() {
+    if (!bridge?.listRecentProjects) return;
+    try {
+      const projects = await bridge.listRecentProjects();
+      set({ recentProjects: projects ?? [] });
+    } catch {
+      set({ recentProjects: [] });
+    }
+  }
+
   async function selectNode(file: string, path: number[]) {
     if (!bridge) return;
     const node = await bridge.resolveNode(file, path);
@@ -554,9 +575,95 @@ export function createShellState() {
     }
   }
 
+  function errorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+  }
+
+  async function runOpen(openProject: () => Promise<unknown>, label: string) {
+    set({ busy: true, notice: null });
+    try {
+      await openProject();
+    } catch (error) {
+      set({ notice: `${label}失败: ${errorMessage(error)}` });
+    } finally {
+      set({ busy: false });
+      void refreshRecentProjects();
+    }
+  }
+
   const actions: ShellActionsWithTokens = {
     openProject: () => {
-      void bridge?.openProject();
+      if (!bridge?.openProject) return;
+      void runOpen(() => bridge.openProject(), "打开项目");
+    },
+    openRecentProject: (projectRoot) => {
+      if (!bridge?.openPath) return;
+      void runOpen(() => bridge.openPath(projectRoot), "打开项目");
+    },
+    createProject: () => {
+      if (!bridge?.createProject) return;
+      void (async () => {
+        set({ busy: true, notice: null });
+        try {
+          const result = await bridge.createProject?.();
+          if (result && !result.ok && !result.canceled) {
+            set({
+              notice: `创建项目失败: ${result.error ?? "未知错误"}`,
+            });
+          }
+        } catch (error) {
+          set({ notice: `创建项目失败: ${errorMessage(error)}` });
+        } finally {
+          set({ busy: false });
+          void refreshRecentProjects();
+        }
+      })();
+    },
+    removeRecentProject: (projectRoot) => {
+      if (!bridge?.removeRecentProject) return;
+      void bridge
+        .removeRecentProject(projectRoot)
+        .then((projects) => set({ recentProjects: projects }))
+        .catch(() => {});
+    },
+    showWorkspace: () => {
+      selected = null;
+      multiSelectionPaths = [];
+      set({
+        projectRoot: null,
+        manifest: null,
+        pages: [],
+        activePageId: null,
+        layers: [],
+        selection: null,
+        diagnostics: [],
+        canUndo: false,
+        canRedo: false,
+        busy: false,
+        notice: null,
+        tokens: [],
+        components: [],
+        stats: null,
+        gitStatus: null,
+        history: [],
+        branches: null,
+        isHistoryPreview: false,
+        previewCommit: null,
+        comments: [],
+        activeCommentThreadId: null,
+        prototypeMode: false,
+        showHotspots: false,
+        activeTool: "select",
+        zoom: 1,
+      });
+      bridge?.sendPrototypeMode?.(false);
+      bridge?.sendShowHotspots?.(false);
+      void bridge?.showWorkspace?.();
+      void refreshRecentProjects();
+    },
+    openExample: () => {
+      if (!bridge?.openExample) return;
+      void runOpen(() => bridge.openExample(), "打开示例项目");
     },
     selectPage: (pageId) => {
       set({ activePageId: pageId, selection: null, layers: [] });
@@ -1140,6 +1247,7 @@ export function createShellState() {
       try {
         const res = await bridge.openBundle();
         if (!res.ok) set({ notice: "打开项目包失败" });
+        else void refreshRecentProjects();
         return res.ok;
       } catch (e) {
         set({
@@ -1661,6 +1769,9 @@ export function createShellState() {
 
   if (bridge) {
     bridge.onProject(applyProject);
+    bridge.onRecentProjects?.((projects) => {
+      set({ recentProjects: projects });
+    });
     bridge.onFiles((message) => {
       files = message.files;
       if (message.manifest) {
@@ -1823,6 +1934,7 @@ export function createShellState() {
         void refreshLayers(pageId);
       }
     });
+    void refreshRecentProjects();
   }
   return {
     getView: () => view,
@@ -1835,10 +1947,12 @@ export function createShellState() {
       };
     },
     openPath(path: string) {
-      void bridge?.openPath(path);
+      if (!bridge?.openPath) return;
+      void runOpen(() => bridge.openPath(path), "打开项目");
     },
     openExample() {
-      void bridge?.openExample();
+      if (!bridge?.openExample) return;
+      void runOpen(() => bridge.openExample(), "打开示例项目");
     },
   };
 }

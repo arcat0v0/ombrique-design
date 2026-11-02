@@ -731,3 +731,135 @@ describe("reparentLayer and reorderLayer in createShellState", () => {
     expect(reorderMsg.commands?.[0]?.index).toBe(1);
   });
 });
+describe("workspace and recent project actions", () => {
+  function baseBridge(): Partial<ShellBridge> {
+    return {
+      onProject: () => {},
+      onFiles: () => {},
+      onDoc: () => {},
+      onFatal: () => {},
+      onStats: () => {},
+    };
+  }
+
+  async function waitFor(predicate: () => boolean): Promise<void> {
+    for (let tick = 0; tick < 100; tick += 1) {
+      if (predicate()) return;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    throw new Error("condition was not met in time");
+  }
+
+  const project = {
+    root: "/work/pricing-redesign",
+    name: "pricing-redesign",
+    lastOpenedAt: new Date().toISOString(),
+    pageCount: 3,
+    exists: true,
+    thumbnail: null,
+  };
+
+  it("opens a recent project and refreshes the local history", async () => {
+    const opened: string[] = [];
+    const { promise: openCalled, resolve } = Promise.withResolvers<void>();
+    installBridge({
+      ...baseBridge(),
+      openPath: async (path: string) => {
+        opened.push(path);
+        resolve();
+        return path;
+      },
+      listRecentProjects: async () => [project],
+    });
+    const state = createShellState();
+    await waitFor(() => state.getView().recentProjects?.length === 1);
+
+    state.actions.openRecentProject?.("/work/pricing-redesign");
+    await openCalled;
+    await waitFor(() => state.getView().busy === false);
+
+    expect(opened).toEqual(["/work/pricing-redesign"]);
+    expect(state.getView().recentProjects).toEqual([project]);
+    expect(state.getView().notice).toBeNull();
+  });
+
+  it("removes a recent project from the list", async () => {
+    const { promise: removalCalled, resolve } = Promise.withResolvers<void>();
+    installBridge({
+      ...baseBridge(),
+      listRecentProjects: async () => [project],
+      removeRecentProject: async () => {
+        resolve();
+        return [];
+      },
+    });
+    const state = createShellState();
+    await waitFor(() => state.getView().recentProjects?.length === 1);
+
+    state.actions.removeRecentProject?.("/work/pricing-redesign");
+    await removalCalled;
+    await waitFor(() => state.getView().recentProjects?.length === 0);
+
+    expect(state.getView().recentProjects).toEqual([]);
+  });
+
+  it("surfaces project creation errors without leaving busy state", async () => {
+    installBridge({
+      ...baseBridge(),
+      listRecentProjects: async () => [],
+      createProject: async () => ({
+        ok: false,
+        error: "请选择一个空文件夹来创建新项目",
+      }),
+    });
+    const state = createShellState();
+    state.actions.createProject?.();
+    await waitFor(() => Boolean(state.getView().notice));
+
+    expect(state.getView().notice).toContain("创建项目失败");
+    expect(state.getView().notice).toContain("空文件夹");
+    expect(state.getView().busy).toBe(false);
+  });
+
+  it("returns to the workspace and hides the canvas bridge", async () => {
+    type ProjectPayload = {
+      root: string;
+      manifest: {
+        formatVersion: 1;
+        pages: Array<{ id: string; name: string; file: string }>;
+      };
+      files: Record<string, string>;
+    };
+    const handlers: {
+      project: ((payload: ProjectPayload) => void) | null;
+    } = { project: null };
+    let workspaceCalls = 0;
+    installBridge({
+      ...baseBridge(),
+      tree: async () => [],
+      onProject: (cb) => {
+        handlers.project = cb as unknown as (payload: ProjectPayload) => void;
+      },
+      showWorkspace: async () => {
+        workspaceCalls += 1;
+        return true;
+      },
+    });
+    const state = createShellState();
+    handlers.project?.({
+      root: "/work/pricing-redesign",
+      manifest: {
+        formatVersion: 1,
+        pages: [{ id: "home", name: "Home", file: "pages/home.tsx" }],
+      },
+      files: {},
+    });
+    expect(state.getView().projectRoot).toBe("/work/pricing-redesign");
+
+    state.actions.showWorkspace?.();
+    expect(state.getView().projectRoot).toBeNull();
+    expect(state.getView().pages).toEqual([]);
+    expect(state.getView().manifest).toBeNull();
+    expect(workspaceCalls).toBe(1);
+  });
+});

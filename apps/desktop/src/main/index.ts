@@ -16,9 +16,11 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  unlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join, normalize, resolve, sep } from "node:path";
+import { basename, dirname, join, normalize, resolve, sep } from "node:path";
 import { mimeFor, urlToProjectPath } from "@ombrique/compiler";
 import {
   createBranch,
@@ -35,11 +37,20 @@ import {
 } from "@ombrique/doc-service";
 import {
   type ExportNodeRequest,
+  type RecentProject,
   exportNodeRequestSchema,
   commentsDocSchema,
   planExportFiles,
 } from "@ombrique/protocol";
 import { executeExportPlan, resolveExportScale } from "./export-writer";
+import {
+  mergeRecentProject,
+  readRecentProjectRecords,
+  recentProjectThumbnailPath,
+  removeRecentProject,
+  writeRecentProjectRecords,
+} from "./recent-projects";
+import { scaffoldProject } from "./project-scaffold";
 
 const here = __dirname;
 const rendererDir = join(here, "../renderer");
@@ -70,8 +81,21 @@ interface DocHost {
 
 let docHost: DocHost | null = null;
 let projectRoot: string | null = null;
+let projectOpenMeta: {
+  root: string;
+  label: string;
+  transient: boolean;
+} | null = null;
 let shellWindow: BrowserWindow | null = null;
 let canvasView: WebContentsView | null = null;
+let canvasReady = false;
+let canvasVisible = false;
+let projectDelivered = false;
+let lastCanvasBounds: CanvasBounds | null = null;
+let pendingProjectMessage: Record<string, unknown> | null = null;
+let pendingFilesMessage: Record<string, unknown> | null = null;
+let pendingManifest: unknown = null;
+let revealCanvasOnNextBounds = false;
 let projectFiles: Record<string, string> = {};
 let previewActive = false;
 let workingTreeFiles: Record<string, string> = {};
@@ -242,18 +266,41 @@ function wireDocHost(host: DocHost) {
       return;
     }
     if (type === "project") {
-      projectRoot = String(message.root);
+      const root = String(message.root);
+      projectRoot = root;
       projectFiles = (message.files as Record<string, string>) ?? {};
+      const manifest = message.manifest as { pages?: unknown[] } | undefined;
+      pendingProjectMessage = message;
+      pendingFilesMessage = null;
+      pendingManifest = message.manifest ?? null;
+      ensureCanvasView();
+      projectDelivered = false;
       shellWindow?.webContents.send("ombrique:project", message);
-      canvasView?.webContents.send("ombrique:project", message);
+      revealCanvasOnNextBounds = !canvasVisible;
+      flushCanvasMessages();
+      const meta = projectOpenMeta?.root === root ? projectOpenMeta : null;
+      if (!process.env.OMBRIQUE_E2E && !meta?.transient) {
+        try {
+          recordRecentProject(
+            root,
+            meta?.label ?? basename(root),
+            manifest?.pages?.length,
+          );
+        } catch {}
+        scheduleThumbnailCapture(root);
+      }
       return;
     }
     if (type === "files") {
       projectFiles = (message.files as Record<string, string>) ?? projectFiles;
+      pendingFilesMessage = message;
+      if (message.manifest) pendingManifest = message.manifest;
       shellWindow?.webContents.send("ombrique:files", message);
-      canvasView?.webContents.send("ombrique:files", message);
-      if (message.manifest) {
-        canvasView?.webContents.send("ombrique:manifest", message.manifest);
+      if (canvasView && canvasReady && canvasVisible) {
+        canvasView.webContents.send("ombrique:files", message);
+        if (message.manifest) {
+          canvasView.webContents.send("ombrique:manifest", message.manifest);
+        }
       }
       return;
     }
@@ -275,12 +322,14 @@ function wireDocHost(host: DocHost) {
   });
 }
 
-function applyCanvasBounds(bounds: {
+interface CanvasBounds {
   x: number;
   y: number;
   width: number;
   height: number;
-}) {
+}
+
+function applyCanvasBounds(bounds: CanvasBounds) {
   if (!canvasView) return;
   const x = Math.max(0, Math.round(bounds.x));
   const y = Math.max(0, Math.round(bounds.y));
@@ -290,32 +339,57 @@ function applyCanvasBounds(bounds: {
   canvasView.setBounds({ x, y, width, height });
 }
 
-ipcMain.on(
-  "ombrique:canvasBounds",
-  (_event, bounds: { x: number; y: number; width: number; height: number }) => {
-    if (
-      typeof bounds?.x !== "number" ||
-      typeof bounds?.y !== "number" ||
-      typeof bounds?.width !== "number" ||
-      typeof bounds?.height !== "number"
-    ) {
-      return;
+function flushCanvasMessages() {
+  if (!canvasView || !canvasReady || !canvasVisible) return;
+  if (!projectDelivered && pendingProjectMessage) {
+    canvasView.webContents.send("ombrique:project", pendingProjectMessage);
+    projectDelivered = true;
+    if (pendingFilesMessage) {
+      canvasView.webContents.send("ombrique:files", pendingFilesMessage);
     }
-    applyCanvasBounds(bounds);
-  },
-);
+    if (pendingManifest) {
+      canvasView.webContents.send("ombrique:manifest", pendingManifest);
+    }
+  }
+}
+
+ipcMain.on("ombrique:canvasBounds", (_event, bounds: CanvasBounds) => {
+  if (
+    typeof bounds?.x !== "number" ||
+    typeof bounds?.y !== "number" ||
+    typeof bounds?.width !== "number" ||
+    typeof bounds?.height !== "number"
+  ) {
+    return;
+  }
+  lastCanvasBounds = {
+    x: bounds.x,
+    y: bounds.y,
+    width: bounds.width,
+    height: bounds.height,
+  };
+  applyCanvasBounds(lastCanvasBounds);
+  if (revealCanvasOnNextBounds) {
+    revealCanvasOnNextBounds = false;
+    canvasView?.setVisible(true);
+    canvasVisible = true;
+  }
+  flushCanvasMessages();
+});
 
 function layoutCanvas() {
   if (!shellWindow || !canvasView) return;
   const size = shellWindow.getContentSize();
   const width = size[0] ?? 1680;
   const height = size[1] ?? 1020;
-  applyCanvasBounds({
+  const bounds = {
     x: 240,
     y: 40,
     width: width - 240 - 280,
     height: height - 40 - 28,
-  });
+  };
+  lastCanvasBounds = bounds;
+  applyCanvasBounds(bounds);
 }
 
 function createCanvasView(): WebContentsView {
@@ -327,7 +401,23 @@ function createCanvasView(): WebContentsView {
       nodeIntegration: false,
     },
   });
+  view.setVisible(false);
+  view.webContents.on("did-start-loading", () => {
+    canvasReady = false;
+    projectDelivered = false;
+  });
   return view;
+}
+
+function ensureCanvasView(): WebContentsView | null {
+  if (canvasView) return canvasView;
+  if (!shellWindow) return null;
+  canvasView = createCanvasView();
+  shellWindow.contentView.addChildView(canvasView);
+  if (lastCanvasBounds) applyCanvasBounds(lastCanvasBounds);
+  else layoutCanvas();
+  void canvasView.webContents.loadURL("ombrique://app/");
+  return canvasView;
 }
 
 function createShellWindow() {
@@ -386,10 +476,6 @@ if (process.platform === "darwin") {
 function createShellWindowContents() {
   const win = shellWindow;
   if (!win) return;
-  canvasView = createCanvasView();
-  win.contentView.addChildView(canvasView);
-  layoutCanvas();
-  void canvasView.webContents.loadURL("ombrique://app/");
 
   if (process.env.ELECTRON_RENDERER_URL) {
     void win.loadURL(process.env.ELECTRON_RENDERER_URL);
@@ -412,7 +498,27 @@ function createShellWindowContents() {
   });
   win.on("closed", () => {
     canvasView = null;
+    canvasReady = false;
+    canvasVisible = false;
+    projectDelivered = false;
+    lastCanvasBounds = null;
+    pendingProjectMessage = null;
+    pendingFilesMessage = null;
+    pendingManifest = null;
     shellWindow = null;
+  });
+}
+
+function openProjectRoot(
+  root: string,
+  label?: string,
+  transient = false,
+): void {
+  projectRoot = root;
+  projectOpenMeta = { root, label: label ?? basename(root), transient };
+  ensureDocHost().send({
+    type: "shell",
+    message: { kind: "openProject", path: root },
   });
 }
 
@@ -420,21 +526,42 @@ ipcMain.handle("ombrique:openProject", async () => {
   const result = await dialog.showOpenDialog({ properties: ["openDirectory"] });
   const picked = result.filePaths[0];
   if (!picked) return null;
-  projectRoot = picked;
-  ensureDocHost().send({
-    type: "shell",
-    message: { kind: "openProject", path: picked },
-  });
+  openProjectRoot(picked);
   return picked;
 });
 
 ipcMain.handle("ombrique:openPath", async (_event, path: string) => {
-  projectRoot = path;
-  ensureDocHost().send({
-    type: "shell",
-    message: { kind: "openProject", path },
-  });
+  if (typeof path !== "string" || path.trim().length === 0) {
+    throw new Error("项目路径无效");
+  }
+  if (!existsSync(path)) {
+    throw new Error("项目目录不存在，可能已被移动或删除");
+  }
+  openProjectRoot(path);
   return path;
+});
+
+ipcMain.handle("ombrique:createProject", async () => {
+  const win = shellWindow ?? BrowserWindow.getFocusedWindow();
+  if (!win) return { ok: false, error: "窗口不可用" };
+  const picked = await dialog.showOpenDialog(win, {
+    title: "选择一个空文件夹作为新项目",
+    buttonLabel: "使用此文件夹",
+    properties: ["openDirectory", "createDirectory"],
+  });
+  const directory = picked.filePaths[0];
+  if (picked.canceled || !directory) return { ok: false, canceled: true };
+  try {
+    const hasManifest = existsSync(join(directory, "ombrique.json"));
+    if (!hasManifest) scaffoldProject(directory);
+    openProjectRoot(directory, basename(directory));
+    return { ok: true, root: directory, created: !hasManifest };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 });
 
 ipcMain.handle("ombrique:shellMessage", async (_event, message: unknown) => {
@@ -541,13 +668,98 @@ function exampleProjectRoot(): string {
   return found ?? candidates[0] ?? process.cwd();
 }
 
+function workspaceDataDir(): string {
+  return app.getPath("userData");
+}
+
+function thumbnailDataUrl(root: string): string | null {
+  try {
+    const bytes = readFileSync(
+      recentProjectThumbnailPath(workspaceDataDir(), root),
+    );
+    return `data:image/jpeg;base64,${bytes.toString("base64")}`;
+  } catch {
+    return null;
+  }
+}
+
+function listRecentProjects(): RecentProject[] {
+  return readRecentProjectRecords(workspaceDataDir()).map((record) => ({
+    ...record,
+    exists: existsSync(record.root),
+    thumbnail: thumbnailDataUrl(record.root),
+  }));
+}
+
+function pushRecentProjects(): void {
+  shellWindow?.webContents.send(
+    "ombrique:recentProjects",
+    listRecentProjects(),
+  );
+}
+
+function recordRecentProject(
+  root: string,
+  name: string,
+  pageCount?: number,
+): void {
+  const dataDir = workspaceDataDir();
+  const records = mergeRecentProject(readRecentProjectRecords(dataDir), {
+    root,
+    name,
+    lastOpenedAt: new Date().toISOString(),
+    ...(pageCount === undefined ? {} : { pageCount }),
+  });
+  writeRecentProjectRecords(dataDir, records);
+  pushRecentProjects();
+}
+
+function scheduleThumbnailCapture(root: string): void {
+  setTimeout(async () => {
+    if (projectRoot !== root || !canvasView || !canvasVisible) return;
+    try {
+      const image = await canvasView.webContents.capturePage();
+      if (image.isEmpty()) return;
+      const size = image.getSize();
+      if (size.width < 200 || size.height < 120) return;
+      const thumbnail = image.resize({ width: 480, quality: "good" });
+      const target = recentProjectThumbnailPath(workspaceDataDir(), root);
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, thumbnail.toJPEG(72));
+      pushRecentProjects();
+    } catch {}
+  }, 2600);
+}
+
+ipcMain.handle("ombrique:listRecentProjects", () => listRecentProjects());
+
+ipcMain.handle("ombrique:removeRecentProject", (_event, root: string) => {
+  if (typeof root !== "string" || root.length === 0) {
+    return listRecentProjects();
+  }
+  const dataDir = workspaceDataDir();
+  writeRecentProjectRecords(
+    dataDir,
+    removeRecentProject(readRecentProjectRecords(dataDir), root),
+  );
+  try {
+    unlinkSync(recentProjectThumbnailPath(dataDir, root));
+  } catch {}
+  const projects = listRecentProjects();
+  shellWindow?.webContents.send("ombrique:recentProjects", projects);
+  return projects;
+});
+
+ipcMain.handle("ombrique:showWorkspace", () => {
+  revealCanvasOnNextBounds = false;
+  canvasVisible = false;
+  canvasView?.setVisible(false);
+  return true;
+});
+
 ipcMain.handle("ombrique:openExample", async () => {
   const exampleRoot = exampleProjectRoot();
-  projectRoot = exampleRoot;
-  ensureDocHost().send({
-    type: "shell",
-    message: { kind: "openProject", path: exampleRoot },
-  });
+  openProjectRoot(exampleRoot, "示例项目");
   return exampleRoot;
 });
 
@@ -560,7 +772,13 @@ ipcMain.on(
 
 ipcMain.on(
   "ombrique:fromCanvas",
-  (_event, payload: { channel: string; payload: unknown }) => {
+  (event, payload: { channel: string; payload: unknown }) => {
+    if (payload.channel === "ombrique:canvasReady") {
+      if (!canvasView || event.sender !== canvasView.webContents) return;
+      canvasReady = true;
+      flushCanvasMessages();
+      return;
+    }
     if (payload.channel === "ombrique:toolChanged") {
       const tool = (payload.payload as { tool?: string } | null)?.tool;
       if (
@@ -965,11 +1183,12 @@ ipcMain.handle("ombrique:openBundle", async () => {
   const extractedDir = mkdtempSync(join(tmpdir(), "ombrique-bundle-"));
   try {
     await extractBundle(srcFile, extractedDir);
-    projectRoot = extractedDir;
-    ensureDocHost().send({
-      type: "shell",
-      message: { kind: "openProject", path: extractedDir },
-    });
+    const bundleName = basename(srcFile).replace(/\.ombrique$/i, "");
+    openProjectRoot(
+      extractedDir,
+      bundleName.length > 0 ? bundleName : basename(extractedDir),
+      true,
+    );
     return { ok: true, root: extractedDir };
   } catch (error) {
     return { ok: false, error: String(error) };

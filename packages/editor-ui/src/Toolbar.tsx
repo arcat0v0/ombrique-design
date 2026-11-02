@@ -1,28 +1,20 @@
+import type { RecentProject } from "@ombrique/protocol";
 import {
   ArchiveIcon,
   CheckIcon,
   ChevronDownIcon,
-  CircleIcon,
   CombineIcon,
   ComponentIcon,
   DownloadIcon,
-  FolderOpenIcon,
-  FrameIcon,
   GroupIcon,
-  ImageIcon,
+  LayoutGridIcon,
   Loader2Icon,
   Maximize2Icon,
-  PackageOpenIcon,
-  PenToolIcon,
   PlayIcon,
   Redo2Icon,
-  SquareIcon,
-  StarIcon,
-  TypeIcon,
   Undo2Icon,
   UngroupIcon,
   ZapIcon,
-  type LucideIcon,
 } from "lucide-react";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -54,14 +46,6 @@ import {
 import type { CanvasStats } from "./types";
 import { ApplicationMenu } from "./ApplicationMenu";
 
-export type InsertKind =
-  | "frame"
-  | "rect"
-  | "ellipse"
-  | "star"
-  | "pen"
-  | "text"
-  | "image";
 export interface ToolbarProps {
   canUndo: boolean;
   canRedo: boolean;
@@ -78,15 +62,18 @@ export interface ToolbarProps {
   onGroupSelection?: () => void;
   onUngroupSelection?: () => void;
   onFlattenSelection?: () => Promise<boolean> | undefined;
-  onInsertImage?: () => Promise<boolean> | undefined;
   onCreateComponent?: (name: string) => void;
+  projectName?: string;
+  recentProjects?: RecentProject[];
   onOpenProject: () => void;
+  onCreateProject?: () => void;
   onOpenExample?: () => void;
   onOpenBundle?: () => Promise<boolean> | undefined;
+  onOpenRecentProject?: (root: string) => void;
+  onShowWorkspace?: () => void;
   onBundleProject?: () => Promise<boolean> | undefined;
   onUndo: () => void;
   onRedo: () => void;
-  onCreateNode: (kind: InsertKind) => void;
   onDeleteSelection?: () => void;
   onZoomTo?: (factor: number) => void;
   onZoomToFit: () => void;
@@ -102,20 +89,6 @@ export interface ToolbarProps {
   onTogglePrototypeMode?: () => void;
   onToggleHotspots?: () => void;
 }
-
-const INSERT_TOOLS: Array<{
-  kind: InsertKind;
-  label: string;
-  icon: LucideIcon;
-}> = [
-  { kind: "frame", label: "Frame", icon: FrameIcon },
-  { kind: "rect", label: "矩形", icon: SquareIcon },
-  { kind: "ellipse", label: "椭圆", icon: CircleIcon },
-  { kind: "star", label: "星形", icon: StarIcon },
-  { kind: "pen", label: "钢笔", icon: PenToolIcon },
-  { kind: "text", label: "文字", icon: TypeIcon },
-  { kind: "image", label: "图片", icon: ImageIcon },
-];
 
 export function Toolbar({
   canUndo,
@@ -133,15 +106,18 @@ export function Toolbar({
   onGroupSelection,
   onUngroupSelection,
   onFlattenSelection,
-  onInsertImage,
   onCreateComponent,
+  projectName,
+  recentProjects,
   onOpenProject,
+  onCreateProject,
   onOpenExample,
   onOpenBundle,
+  onOpenRecentProject,
+  onShowWorkspace,
   onBundleProject,
   onUndo,
   onRedo,
-  onCreateNode,
   onDeleteSelection,
   onZoomTo,
   onZoomToFit,
@@ -170,7 +146,18 @@ export function Toolbar({
             zoom={zoom}
             busy={busy}
             onOpenProject={onOpenProject}
+            onCreateProject={onCreateProject}
+            onOpenBundle={
+              onOpenBundle
+                ? () => {
+                    void onOpenBundle();
+                  }
+                : undefined
+            }
             onOpenExample={onOpenExample}
+            onOpenRecentProject={onOpenRecentProject}
+            onShowWorkspace={onShowWorkspace}
+            recentProjects={recentProjects}
             onExport={onExport}
             onUndo={onUndo}
             onRedo={onRedo}
@@ -185,46 +172,37 @@ export function Toolbar({
             onCloseWindow={onCloseWindow}
           />
 
-          <Separator orientation="vertical" className="mx-1 h-4" />
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="xs"
-                aria-label="打开项目"
-                title="打开项目"
-                disabled={busy}
-                className="h-7 gap-1 px-2 text-xs font-normal"
+          {onShowWorkspace && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label="返回工作区"
+                  title="返回工作区"
+                  disabled={busy}
+                  onClick={onShowWorkspace}
+                  className="size-7"
+                >
+                  <LayoutGridIcon data-icon="inline-start" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">返回工作区</TooltipContent>
+            </Tooltip>
+          )}
+
+          {projectName && (
+            <div className="ml-1 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+              <span className="text-muted-foreground/40">/</span>
+              <span
+                className="max-w-44 truncate font-medium text-foreground/80"
+                title={projectName}
               >
-                <FolderOpenIcon data-icon="inline-start" />
-                <span>打开项目</span>
-                <ChevronDownIcon className="size-3 opacity-60 ml-0.5" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-56">
-              <DropdownMenuItem
-                onClick={onOpenProject}
-                className="text-xs cursor-pointer"
-              >
-                <FolderOpenIcon className="size-3.5 mr-2" />
-                <span>打开本地项目目录</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => {
-                  void onOpenBundle?.();
-                }}
-                disabled={!onOpenBundle}
-                className="text-xs cursor-pointer"
-                title={
-                  onOpenBundle ? "打开打包分发文件" : "核心尚未接线 openBundle"
-                }
-              >
-                <PackageOpenIcon className="size-3.5 mr-2" />
-                <span>打开 .ombrique 安装包</span>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                {projectName}
+              </span>
+            </div>
+          )}
 
           <Separator orientation="vertical" className="mx-1 h-4" />
 
@@ -270,46 +248,6 @@ export function Toolbar({
                 <Kbd>Ctrl+Shift+Z</Kbd>
               </TooltipContent>
             </Tooltip>
-          </div>
-
-          <Separator orientation="vertical" className="mx-1 h-4" />
-
-          <div className="flex items-center gap-0.5">
-            {INSERT_TOOLS.map((tool) => {
-              const Icon = tool.icon;
-              return (
-                <Tooltip key={tool.kind}>
-                  <TooltipTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="xs"
-                      aria-label={`插入${tool.label}`}
-                      title={`插入${tool.label}`}
-                      disabled={busy}
-                      onClick={() => {
-                        if (tool.kind === "image") {
-                          if (onInsertImage) {
-                            void onInsertImage();
-                            return;
-                          }
-                          onCreateNode("image");
-                          return;
-                        }
-                        onCreateNode(tool.kind);
-                      }}
-                      className="h-7 gap-1 px-2 text-xs font-normal"
-                    >
-                      <Icon data-icon="inline-start" />
-                      <span>{tool.label}</span>
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">
-                    插入 {tool.label}
-                  </TooltipContent>
-                </Tooltip>
-              );
-            })}
           </div>
 
           <Separator orientation="vertical" className="mx-1 h-4" />
