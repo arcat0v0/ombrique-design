@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   CoinsIcon,
   ComponentIcon,
@@ -28,6 +28,7 @@ import { TokensPanel } from "./TokensPanel";
 import { VersionHistoryPanel } from "./VersionHistoryPanel";
 import { CommentsPanel } from "./CommentsPanel";
 import { Toolbar } from "./Toolbar";
+import { WindowControls } from "./WindowControls";
 import type { ShellActions, ShellView } from "./types";
 import { Workspace } from "./Workspace";
 import "./theme.css";
@@ -44,12 +45,23 @@ function projectNameOf(root: string | null): string | undefined {
 }
 
 export function Shell({ view, actions }: ShellProps) {
+  const windowControls =
+    view.platform === "linux" ? (
+      <WindowControls
+        maximized={view.windowMaximized}
+        onMinimize={actions.minimizeWindow}
+        onToggleMaximize={actions.toggleWindowMaximize}
+        onClose={actions.closeWindow}
+      />
+    ) : undefined;
   if (!view.projectRoot) {
     return (
       <Workspace
         recentProjects={view.recentProjects}
         busy={view.busy}
         notice={view.notice}
+        windowControls={windowControls}
+        titleBarDrag={Boolean(windowControls)}
         onOpenRecent={(root) => actions.openRecentProject?.(root)}
         onOpenProject={actions.openProject}
         onCreateProject={() => actions.createProject?.()}
@@ -66,10 +78,20 @@ export function Shell({ view, actions }: ShellProps) {
       />
     );
   }
-  return <EditorShell view={view} actions={actions} />;
+  return (
+    <EditorShell
+      view={view}
+      actions={actions}
+      windowControls={windowControls}
+    />
+  );
 }
 
-function EditorShell({ view, actions }: ShellProps) {
+function EditorShell({
+  view,
+  actions,
+  windowControls,
+}: ShellProps & { windowControls?: ReactNode }) {
   const canvasMountRef = useRef<HTMLDivElement>(null);
   const [leftTab, setLeftTab] = useState<
     "layers" | "assets" | "tokens" | "history" | "comments"
@@ -128,6 +150,36 @@ function EditorShell({ view, actions }: ShellProps) {
         } else {
           handleGroup();
         }
+        return;
+      }
+      if (mod && event.shiftKey && key === "h") {
+        event.preventDefault();
+        actions.toggleHidden();
+        return;
+      }
+      if (mod && event.shiftKey && key === "l") {
+        event.preventDefault();
+        actions.toggleLocked();
+        return;
+      }
+      if (event.shiftKey && event.key === "1") {
+        event.preventDefault();
+        actions.zoomToFit();
+        return;
+      }
+      if ((mod && key === "0") || (event.shiftKey && event.key === "0")) {
+        event.preventDefault();
+        actions.zoomTo(1);
+        return;
+      }
+      if (mod && (key === "=" || key === "+")) {
+        event.preventDefault();
+        actions.zoomTo(view.zoom * 1.25);
+        return;
+      }
+      if (mod && (key === "-" || key === "_")) {
+        event.preventDefault();
+        actions.zoomTo(view.zoom * 0.8);
         return;
       }
       if (!mod && key === "c") {
@@ -251,6 +303,8 @@ function EditorShell({ view, actions }: ShellProps) {
                 showHotspots={view.showHotspots}
                 onTogglePrototypeMode={actions.togglePrototypeMode}
                 onToggleHotspots={actions.toggleHotspots}
+                windowControls={windowControls}
+                titleBarDrag={Boolean(windowControls)}
               />
             );
           })()}

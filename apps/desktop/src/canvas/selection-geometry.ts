@@ -30,3 +30,18 @@ export function worldRectFromClientRect(
     height: element.height / scale,
   };
 }
+
+export function resolveParentOrigin(
+  element: Element,
+  boardOrigin: { x: number; y: number },
+  rectFn: (el: Element) => WorldRect,
+): { x: number; y: number } {
+  const board = element.closest<HTMLElement>(".board");
+  if (!board) return { x: 0, y: 0 };
+  const parent = element.parentElement;
+  if (!parent || parent === board) {
+    return boardOrigin;
+  }
+  const parentRect = rectFn(parent);
+  return { x: parentRect.x, y: parentRect.y };
+}

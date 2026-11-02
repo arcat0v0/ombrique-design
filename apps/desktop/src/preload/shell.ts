@@ -2,6 +2,7 @@ import type { CanvasTool } from "@ombrique/editor-ui";
 import { contextBridge, ipcRenderer } from "electron";
 
 contextBridge.exposeInMainWorld("ombriqueShell", {
+  platform: process.platform,
   openProject: () => ipcRenderer.invoke("ombrique:openProject"),
   openPath: (path: string) => ipcRenderer.invoke("ombrique:openPath", path),
   send: (message: unknown) =>
@@ -121,6 +122,21 @@ contextBridge.exposeInMainWorld("ombriqueShell", {
   },
   onClipboardEdit: (cb: (payload: unknown) => void) => {
     ipcRenderer.on("ombrique:clipboardEdit", (_event, payload) => cb(payload));
+  },
+  minimizeWindow: () => {
+    ipcRenderer.send("ombrique:windowControl", "minimize");
+  },
+  toggleWindowMaximize: () => {
+    ipcRenderer.send("ombrique:windowControl", "toggleMaximize");
+  },
+  closeWindow: () => {
+    ipcRenderer.send("ombrique:windowControl", "close");
+  },
+  getWindowState: () => ipcRenderer.invoke("ombrique:getWindowState"),
+  onWindowState: (
+    cb: (state: { maximized: boolean; fullscreen: boolean }) => void,
+  ) => {
+    ipcRenderer.on("ombrique:windowState", (_event, state) => cb(state));
   },
   toggleFullscreen: () => {
     ipcRenderer.send("ombrique:windowControl", "toggleFullscreen");

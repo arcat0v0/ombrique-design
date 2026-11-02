@@ -15,7 +15,7 @@ import {
   UngroupIcon,
   ZapIcon,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -84,6 +84,8 @@ export interface ToolbarProps {
   showHotspots?: boolean;
   onTogglePrototypeMode?: () => void;
   onToggleHotspots?: () => void;
+  windowControls?: ReactNode;
+  titleBarDrag?: boolean;
 }
 
 export function Toolbar({
@@ -125,12 +127,16 @@ export function Toolbar({
   showHotspots = false,
   onTogglePrototypeMode,
   onToggleHotspots,
+  windowControls,
+  titleBarDrag = false,
 }: ToolbarProps) {
   const [componentDialogOpen, setComponentDialogOpen] = useState(false);
   const [componentName, setComponentName] = useState("");
   return (
     <TooltipProvider delayDuration={200}>
-      <div className="flex h-10 w-full items-center justify-between border-b border-border bg-card/80 px-2.5 backdrop-blur-xs select-none">
+      <div
+        className={`flex h-10 w-full items-center justify-between border-b border-border bg-card/80 px-2.5 backdrop-blur-xs select-none ${titleBarDrag ? "app-titlebar" : ""}`}
+      >
         <div className="flex items-center gap-1">
           <ApplicationMenu
             canUndo={canUndo}
@@ -315,7 +321,7 @@ export function Toolbar({
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 self-stretch">
           {busy && (
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <Loader2Icon
@@ -557,12 +563,16 @@ export function Toolbar({
           <ViewMenu
             zoom={zoom}
             busy={busy}
+            alignOffset={windowControls ? 112 : 0}
             onZoomTo={onZoomTo}
             onZoomToFit={onZoomToFit}
             onToggleFullscreen={onToggleFullscreen}
             onToggleDevtools={onToggleDevtools}
             onReloadRenderer={onReloadRenderer}
           />
+          {windowControls && (
+            <div className="-mr-2.5 flex self-stretch">{windowControls}</div>
+          )}
         </div>
       </div>
     </TooltipProvider>

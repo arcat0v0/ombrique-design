@@ -34,7 +34,11 @@ import {
   renderRulersOverlay,
   renderSmartGuidesOverlay,
 } from "./interactions";
-import { worldRectFromClientRect, type WorldRect } from "./selection-geometry";
+import {
+  resolveParentOrigin,
+  worldRectFromClientRect,
+  type WorldRect,
+} from "./selection-geometry";
 import { serializeNodeToSvg } from "./export-node";
 interface CanvasBridge {
   onProject: (cb: (payload: ProjectMessage) => void) => void;
@@ -221,6 +225,7 @@ let activeReferenceLine: ReferenceLine | null = null;
 let activeLayoutHandle: LayoutHandle | null = null;
 let prototypeMode = false;
 let showHotspots = false;
+let showRulers = true;
 const prototypeHistory: string[] = [];
 let prototypeFlashTimer: number | undefined;
 let prototypeHotspotsFlashing = false;
@@ -682,6 +687,14 @@ function boardWorldOrigin(element: Element): { x: number; y: number } {
   return { x: 0, y: 0 };
 }
 
+function parentWorldOrigin(element: Element): { x: number; y: number } {
+  return resolveParentOrigin(
+    element,
+    boardWorldOrigin(element),
+    worldRectOf,
+  );
+}
+
 function boardAppliedScale(board: HTMLElement): number {
   const bounds = board.getBoundingClientRect();
   const width = board.offsetWidth;
@@ -779,17 +792,83 @@ function updateBoardResolutions(): void {
   }
 }
 
+let domBoard: { element: HTMLElement; worldX: number } | null = null;
+let pendingBoardSnapshot: { element: Element; node: HTMLElement } | null =
+  null;
+let snapshotTimer: number | undefined;
+
+function domStageElement(): HTMLElement {
+  let element = document.getElementById("stage-dom");
+  if (!element) {
+    element = document.createElement("div");
+    element.id = "stage-dom";
+    overlay.before(element);
+  }
+  return element;
+}
+
+function clearBoardSnapshot(): void {
+  if (!pendingBoardSnapshot) return;
+  pendingBoardSnapshot.node.remove();
+  pendingBoardSnapshot = null;
+  clearTimeout(snapshotTimer);
+  snapshotTimer = undefined;
+}
+
+function enterDomBoard(): void {
+  if (domBoard || !currentFile) return;
+  const entry = boards.get(currentFile);
+  if (!entry) return;
+  clearBoardSnapshot();
+  const element = entry.element as HTMLElement;
+  const origin = boardWorldOrigin(element);
+  domBoard = { element, worldX: origin.x };
+  domStageElement().appendChild(element);
+  element.style.transformOrigin = "0 0";
+  element.style.transform = `translate(${(origin.x - camera.x) * camera.z}px, ${(origin.y - camera.y) * camera.z}px) scale(${camera.z})`;
+  compositor?.suspendBoard(element);
+}
+
+function exitDomBoard(): void {
+  const state = domBoard;
+  if (!state) return;
+  domBoard = null;
+  const { element, worldX } = state;
+  if (!element.isConnected) {
+    compositor?.resumeBoard(element);
+    return;
+  }
+  const snapshot = element.cloneNode(true) as HTMLElement;
+  snapshot.style.pointerEvents = "none";
+  snapshot.setAttribute("aria-hidden", "true");
+  clearBoardSnapshot();
+  domStageElement().appendChild(snapshot);
+  pendingBoardSnapshot = { element, node: snapshot };
+  snapshotTimer = window.setTimeout(clearBoardSnapshot, 400);
+  stage.appendChild(element);
+  element.style.transformOrigin = "";
+  element.style.transform = `translate(${worldX}px, 0px)`;
+  compositor?.resumeBoard(element);
+}
+
+function ensureDragPreview(): void {
+  compositor?.setInteractive(true);
+  if (!domBoard) enterDomBoard();
+  invalidateGuideTargets();
+}
+
 function beginNodeInteraction(): void {
   invalidateGuideTargets();
-  compositor?.setInteractive(true);
 }
 
 function endNodeInteraction(): void {
+  exitDomBoard();
   compositor?.setInteractive(false);
   invalidateGuideTargets();
 }
 
 function fitToViewport(): void {
+  clearBoardSnapshot();
   const allBoards: BoardInit[] = [];
   let x = 0;
   for (const [, entry] of boards) {
@@ -826,6 +905,8 @@ function fitToViewport(): void {
 
 async function mountPage(file: string) {
   if (!manifest) return;
+  exitDomBoard();
+  clearBoardSnapshot();
   currentFile = file;
   for (const [key, board] of boards) {
     if (key === file) continue;
@@ -1663,7 +1744,7 @@ function drawOverlay() {
     activeReferenceLine,
   );
   drawCommentPins();
-  renderRulersOverlay(overlay, camera, lastMouseClient);
+  renderRulersOverlay(overlay, camera, lastMouseClient, showRulers);
   if (!prototypeMode && selection && isEditableNode(selection)) {
     const targetPageId =
       selection.element.getAttribute("data-prototype-navigate") ||
@@ -1692,10 +1773,20 @@ function isSelectableElement(element: Element, board: HTMLElement): boolean {
   return true;
 }
 
-function hitTest(clientX: number, clientY: number): SelectedNode | null {
+function hitTest(
+  clientX: number,
+  clientY: number,
+  directSelect = false,
+): SelectedNode | null {
   const wx = clientX / camera.z + camera.x;
   const wy = clientY / camera.z + camera.y;
-  for (const [element, info] of [...nodeIndex].reverse()) {
+  const matches: Array<{
+    element: Element;
+    info: { file: string; path: number[] };
+    rect: WorldRect;
+  }> = [];
+
+  for (const [element, info] of nodeIndex) {
     const board = element.closest<HTMLElement>(".board");
     if (!board || !element.isConnected) continue;
     if (!isSelectableElement(element, board)) continue;
@@ -1712,16 +1803,44 @@ function hitTest(clientX: number, clientY: number): SelectedNode | null {
     ) {
       continue;
     }
+    matches.push({ element, info, rect });
+  }
+
+  if (matches.length === 0) return null;
+
+  if (directSelect) {
+    const deepest = matches[matches.length - 1];
+    if (!deepest) return null;
     return {
-      file: info.file,
-      path: info.path,
-      tag: element.tagName.toLowerCase(),
-      name: element.getAttribute("data-name"),
-      rect,
-      element,
+      file: deepest.info.file,
+      path: deepest.info.path,
+      tag: deepest.element.tagName.toLowerCase(),
+      name: deepest.element.getAttribute("data-name"),
+      rect: deepest.rect,
+      element: deepest.element,
     };
   }
-  return null;
+
+  let chosen = matches[0];
+  if (selection) {
+    const selEl = selection.element;
+    const insideSelection = matches.filter(
+      (m) => m.element !== selEl && selEl.contains(m.element),
+    );
+    if (insideSelection.length > 0) {
+      chosen = insideSelection[0] ?? chosen;
+    }
+  }
+
+  if (!chosen) return null;
+  return {
+    file: chosen.info.file,
+    path: chosen.info.path,
+    tag: chosen.element.tagName.toLowerCase(),
+    name: chosen.element.getAttribute("data-name"),
+    rect: chosen.rect,
+    element: chosen.element,
+  };
 }
 
 function handleAtPoint(clientX: number, clientY: number): HandleId | null {
@@ -1769,13 +1888,13 @@ function commitMove(node: SelectedNode, dx: number, dy: number): void {
   const flags = flagsOf(node);
   const usesAttrsX = flags.attrs.includes("x") && flags.attrs.includes("y");
   const target = { file: node.file, start: 0, end: 0, path: node.path };
-  const boardOrigin = boardWorldOrigin(node.element);
+  const pOrigin = parentWorldOrigin(node.element);
   const orig =
     drag.nodeOrigins?.get(nodeKeyOf(node.file, node.path)) ??
     drag.originRect ??
     syncNodeRect(node);
-  const x = Math.round(orig.x + dx - boardOrigin.x);
-  const y = Math.round(orig.y + dy - boardOrigin.y);
+  const x = Math.round(orig.x + dx - pOrigin.x);
+  const y = Math.round(orig.y + dy - pOrigin.y);
   const commands: unknown[] = [];
   if (usesAttrsX) {
     commands.push({
@@ -1827,12 +1946,12 @@ function commitScale(
   const attrsW =
     flags.attrs.includes("width") && flags.attrs.includes("height");
   const target = { file: node.file, start: 0, end: 0, path: node.path };
-  const boardOrigin = boardWorldOrigin(node.element);
+  const pOrigin = parentWorldOrigin(node.element);
   const commands: unknown[] = [];
   if (usesAttrsX) {
     const patch: Record<string, number> = {};
-    if (movesX) patch.x = Math.round(x - boardOrigin.x);
-    if (movesY) patch.y = Math.round(y - boardOrigin.y);
+    if (movesX) patch.x = Math.round(x - pOrigin.x);
+    if (movesY) patch.y = Math.round(y - pOrigin.y);
     if (attrsW) {
       patch.width = Math.round(width);
       patch.height = Math.round(height);
@@ -1842,8 +1961,8 @@ function commitScale(
     }
   } else {
     const declarations: Array<[string, number]> = [];
-    if (movesX) declarations.push(["left", Math.round(x - boardOrigin.x)]);
-    if (movesY) declarations.push(["top", Math.round(y - boardOrigin.y)]);
+    if (movesX) declarations.push(["left", Math.round(x - pOrigin.x)]);
+    if (movesY) declarations.push(["top", Math.round(y - pOrigin.y)]);
     declarations.push(["width", Math.round(width)]);
     if (height !== originRect.height || movesY) {
       declarations.push(["height", Math.round(height)]);
@@ -1863,12 +1982,12 @@ function commitMultiMove(dx: number, dy: number): void {
   for (const node of nodes) {
     const flags = flagsOf(node);
     const target = { file: node.file, start: 0, end: 0, path: node.path };
-    const boardOrigin = boardWorldOrigin(node.element);
+    const pOrigin = parentWorldOrigin(node.element);
     const orig =
       drag.nodeOrigins?.get(nodeKeyOf(node.file, node.path)) ??
       syncNodeRect(node);
-    const x = Math.round(orig.x + dx - boardOrigin.x);
-    const y = Math.round(orig.y + dy - boardOrigin.y);
+    const x = Math.round(orig.x + dx - pOrigin.x);
+    const y = Math.round(orig.y + dy - pOrigin.y);
     if (flags.attrs.includes("x") && flags.attrs.includes("y")) {
       commands.push({
         kind: "setAttrs",
@@ -1891,6 +2010,7 @@ function commitMultiMove(dx: number, dy: number): void {
 
 function previewMove(dx: number, dy: number): void {
   if (!selection || !drag.originRect) return;
+  if (drag.moved) ensureDragPreview();
   const candidateRect = {
     x: drag.originRect.x + dx,
     y: drag.originRect.y + dy,
@@ -1909,12 +2029,12 @@ function previewMove(dx: number, dy: number): void {
   const nodes = multiSelection.length > 1 ? multiSelection : [selection];
   for (const node of nodes) {
     const element = node.element as HTMLElement;
-    const origin = boardWorldOrigin(node.element);
+    const pOrigin = parentWorldOrigin(node.element);
     const orig =
       drag.nodeOrigins?.get(nodeKeyOf(node.file, node.path)) ?? drag.originRect;
     element.style.position = "absolute";
-    element.style.left = `${orig.x + snappedDx - origin.x}px`;
-    element.style.top = `${orig.y + snappedDy - origin.y}px`;
+    element.style.left = `${orig.x + snappedDx - pOrigin.x}px`;
+    element.style.top = `${orig.y + snappedDy - pOrigin.y}px`;
     syncNodeRect(node);
   }
   drawOverlay();
@@ -1927,6 +2047,7 @@ function previewScale(
   dy: number,
 ): void {
   if (!selection) return;
+  if (drag.moved) ensureDragPreview();
   let x = originRect.x;
   let y = originRect.y;
   let width = originRect.width;
@@ -1998,10 +2119,10 @@ function previewScale(
   height = Math.max(1, height);
 
   const element = selection.element as HTMLElement;
-  const origin = boardWorldOrigin(selection.element);
+  const pOrigin = parentWorldOrigin(selection.element);
   element.style.position = "absolute";
-  element.style.left = `${x - origin.x}px`;
-  element.style.top = `${y - origin.y}px`;
+  element.style.left = `${x - pOrigin.x}px`;
+  element.style.top = `${y - pOrigin.y}px`;
   element.style.width = `${width}px`;
   element.style.height = `${height}px`;
   syncNodeRect(selection);
@@ -2012,11 +2133,11 @@ function nudge(dx: number, dy: number): void {
   if (multiSelection.length === 0) return;
   for (const node of multiSelection) {
     const element = node.element as HTMLElement;
-    const origin = boardWorldOrigin(node.element);
+    const pOrigin = parentWorldOrigin(node.element);
     const rect = syncNodeRect(node);
     element.style.position = "absolute";
-    element.style.left = `${rect.x + dx - origin.x}px`;
-    element.style.top = `${rect.y + dy - origin.y}px`;
+    element.style.left = `${rect.x + dx - pOrigin.x}px`;
+    element.style.top = `${rect.y + dy - pOrigin.y}px`;
   }
   refreshRectsOf(multiSelection);
   commitMultiMove(dx, dy);
@@ -2141,6 +2262,174 @@ function commitDelete(nodes: SelectedNode[]): void {
       },
     ],
   });
+}
+
+function selectAll(): void {
+  if (!currentFile) return;
+  const board = boards.get(currentFile);
+  if (!board) return;
+  const topLevel: SelectedNode[] = [];
+  for (const child of Array.from(board.element.children)) {
+    const info = nodeIndex.get(child);
+    if (!info || !isSelectableElement(child, board.element)) continue;
+    topLevel.push({
+      file: info.file,
+      path: info.path,
+      tag: child.tagName.toLowerCase(),
+      name: child.getAttribute("data-name"),
+      rect: worldRectOf(child),
+      element: child,
+    });
+  }
+  if (topLevel.length > 0) {
+    multiSelection = topLevel;
+    selection = topLevel[topLevel.length - 1] ?? null;
+    invalidateGuideTargets();
+    emitSelection();
+    drawOverlay();
+  }
+}
+
+function zoomTo100(): void {
+  const current = compositor?.camera.get();
+  if (!current) return;
+  const bounds = stage.getBoundingClientRect();
+  const next = compositor?.camera.zoomAt(
+    1 / current.z,
+    bounds.width / 2,
+    bounds.height / 2,
+  );
+  if (next) {
+    camera.x = next.x;
+    camera.y = next.y;
+    camera.z = next.z;
+    updateBoardResolutions();
+    refreshSelectionRect();
+    emitZoom();
+    drawOverlay();
+  }
+}
+
+function zoomBy(factor: number): void {
+  const current = compositor?.camera.get();
+  if (!current) return;
+  const bounds = stage.getBoundingClientRect();
+  const next = compositor?.camera.zoomAt(
+    factor,
+    bounds.width / 2,
+    bounds.height / 2,
+  );
+  if (next) {
+    camera.x = next.x;
+    camera.y = next.y;
+    camera.z = next.z;
+    updateBoardResolutions();
+    refreshSelectionRect();
+    emitZoom();
+    drawOverlay();
+  }
+}
+
+function zoomToSelection(): void {
+  const activeNodes =
+    multiSelection.length > 0 ? multiSelection : selection ? [selection] : [];
+  if (activeNodes.length === 0) {
+    fitToViewport();
+    return;
+  }
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const node of activeNodes) {
+    const r = syncNodeRect(node);
+    minX = Math.min(minX, r.x);
+    minY = Math.min(minY, r.y);
+    maxX = Math.max(maxX, r.x + r.width);
+    maxY = Math.max(maxY, r.y + r.height);
+  }
+  const totalW = maxX - minX;
+  const totalH = maxY - minY;
+  if (totalW <= 0 || totalH <= 0) return;
+  const bounds = stage.getBoundingClientRect();
+  const fit = Math.min(
+    (bounds.width - 120) / totalW,
+    (bounds.height - 120) / totalH,
+    4,
+  );
+  camera.z = Math.max(0.05, Math.min(32, fit));
+  camera.x = minX - (bounds.width - totalW * camera.z) / 2 / camera.z;
+  camera.y = minY - (bounds.height - totalH * camera.z) / 2 / camera.z;
+  compositor?.camera.set(camera);
+  updateBoardResolutions();
+  refreshSelectionRect();
+  emitZoom();
+  drawOverlay();
+}
+
+function commitGroup(nodes: SelectedNode[]): void {
+  const editable = nodes.filter(isEditableNode);
+  if (editable.length === 0) return;
+  const targets = editable.map((n) => ({
+    file: n.file,
+    start: 0,
+    end: 0,
+    path: n.path,
+  }));
+  bridge?.send("ombrique:canvasEdit", {
+    commands: [
+      {
+        kind: "groupNodes",
+        targets,
+        pageFile: editable[0]?.file,
+        name: "Group",
+      },
+    ],
+  });
+}
+
+function commitUngroup(nodes: SelectedNode[]): void {
+  const editable = nodes.filter(isEditableNode);
+  if (editable.length === 0) return;
+  const commands = editable.map((n) => ({
+    kind: "ungroupNode",
+    target: { file: n.file, start: 0, end: 0, path: n.path },
+  }));
+  bridge?.send("ombrique:canvasEdit", { commands });
+}
+
+function toggleSelectedHidden(): void {
+  const activeNodes =
+    multiSelection.length > 0 ? multiSelection : selection ? [selection] : [];
+  const editable = activeNodes.filter(isEditableNode);
+  if (editable.length === 0) return;
+  const commands = editable.map((n) => {
+    const isHidden =
+      n.element.hasAttribute("hidden") ||
+      (n.element as HTMLElement).style.display === "none";
+    return {
+      kind: "setAttrs",
+      target: { file: n.file, start: 0, end: 0, path: n.path },
+      attrs: { hidden: !isHidden },
+    };
+  });
+  bridge?.send("ombrique:canvasEdit", { commands });
+}
+
+function toggleSelectedLocked(): void {
+  const activeNodes =
+    multiSelection.length > 0 ? multiSelection : selection ? [selection] : [];
+  const editable = activeNodes.filter(isEditableNode);
+  if (editable.length === 0) return;
+  const commands = editable.map((n) => {
+    const isLocked = n.element.hasAttribute("data-locked");
+    return {
+      kind: "setAttrs",
+      target: { file: n.file, start: 0, end: 0, path: n.path },
+      attrs: { "data-locked": isLocked ? null : "" },
+    };
+  });
+  bridge?.send("ombrique:canvasEdit", { commands });
 }
 
 async function runPerf500(): Promise<void> {
@@ -2280,6 +2569,9 @@ async function init() {
         window as unknown as { __perfOnStats?: (s: typeof stats) => void }
       ).__perfOnStats?.(stats);
     },
+    onBoardUploaded: (element) => {
+      if (pendingBoardSnapshot?.element === element) clearBoardSnapshot();
+    },
   });
   compositor.camera.set(camera);
 
@@ -2324,6 +2616,88 @@ async function init() {
       }
     }
     const mod = event.metaKey || event.ctrlKey;
+    const key = event.key.toLowerCase();
+
+    // 撤销 / 重做 (Undo / Redo)
+    if (mod && (key === "z" || key === "y")) {
+      event.preventDefault();
+      if (key === "y" || event.shiftKey) {
+        bridge?.send("ombrique:canvasAction", { kind: "redo" });
+      } else {
+        bridge?.send("ombrique:canvasAction", { kind: "undo" });
+      }
+      return;
+    }
+
+    // 全选 (Select All)
+    if (mod && key === "a") {
+      event.preventDefault();
+      selectAll();
+      return;
+    }
+
+    // 编组 / 解组 (Group / Ungroup)
+    if (mod && key === "g") {
+      event.preventDefault();
+      const activeNodes =
+        multiSelection.length > 0
+          ? multiSelection
+          : selection
+            ? [selection]
+            : [];
+      if (event.shiftKey) {
+        commitUngroup(activeNodes);
+      } else {
+        commitGroup(activeNodes);
+      }
+      return;
+    }
+
+    // 显隐与锁定快捷键 (Toggle Hide / Lock)
+    if (mod && event.shiftKey && key === "h") {
+      event.preventDefault();
+      toggleSelectedHidden();
+      return;
+    }
+    if (mod && event.shiftKey && key === "l") {
+      event.preventDefault();
+      toggleSelectedLocked();
+      return;
+    }
+
+    // 缩放与视图快捷键
+    if (event.shiftKey && event.key === "1") {
+      event.preventDefault();
+      fitToViewport();
+      return;
+    }
+    if (event.shiftKey && event.key === "2") {
+      event.preventDefault();
+      zoomToSelection();
+      return;
+    }
+    if ((mod && key === "0") || (event.shiftKey && event.key === "0")) {
+      event.preventDefault();
+      zoomTo100();
+      return;
+    }
+    if (mod && (key === "=" || key === "+")) {
+      event.preventDefault();
+      zoomBy(1.25);
+      return;
+    }
+    if (mod && (key === "-" || key === "_")) {
+      event.preventDefault();
+      zoomBy(0.8);
+      return;
+    }
+    if (event.shiftKey && key === "r" && !mod) {
+      event.preventDefault();
+      showRulers = !showRulers;
+      drawOverlay();
+      return;
+    }
+
     if (!mod) {
       const shortcuts: Record<string, CanvasTool> = {
         v: "select",
@@ -2725,7 +3099,66 @@ async function init() {
       drag.moved = false;
       return;
     }
-    const hit = hitTest(event.clientX, event.clientY);
+    const clickWx = event.clientX / camera.z + camera.x;
+    const clickWy = event.clientY / camera.z + camera.y;
+
+    const hitInSelection = (() => {
+      if (isModifier) return null;
+      if (multiSelection.length > 1) {
+        for (const node of multiSelection) {
+          const rect = syncNodeRect(node);
+          if (
+            clickWx >= rect.x &&
+            clickWx <= rect.x + rect.width &&
+            clickWy >= rect.y &&
+            clickWy <= rect.y + rect.height
+          ) {
+            return node;
+          }
+        }
+      }
+      if (selection) {
+        const rect = syncNodeRect(selection);
+        if (
+          clickWx >= rect.x &&
+          clickWx <= rect.x + rect.width &&
+          clickWy >= rect.y &&
+          clickWy <= rect.y + rect.height
+        ) {
+          return selection;
+        }
+      }
+      return null;
+    })();
+
+    if (hitInSelection) {
+      const activeNodes =
+        multiSelection.length > 1
+          ? multiSelection
+          : [selection ?? hitInSelection];
+      if (activeNodes.every(isEditableNode)) {
+        beginNodeInteraction();
+        drag.mode = "move";
+        drag.originRect = selection ? { ...syncNodeRect(selection) } : null;
+        drag.nodeOrigins = new Map(
+          activeNodes.map((n) => {
+            const rect = syncNodeRect(n);
+            return [nodeKeyOf(n.file, n.path), { x: rect.x, y: rect.y }];
+          }),
+        );
+        beginDragSnapshot(activeNodes);
+        drag.x = event.clientX;
+        drag.y = event.clientY;
+        drag.moved = false;
+        return;
+      }
+    }
+
+    const hit = hitTest(
+      event.clientX,
+      event.clientY,
+      Boolean(event.ctrlKey || event.metaKey),
+    );
     if (isModifier && hit) {
       toggleInSelection(hit);
       return;
@@ -2834,6 +3267,7 @@ async function init() {
     ) {
       const dlx = (event.clientX - drag.x) / camera.z;
       const dly = (event.clientY - drag.y) / camera.z;
+      if (dlx !== 0 || dly !== 0) ensureDragPreview();
       const newX = Math.round(drag.originPoint.x + dlx);
       const newY = Math.round(drag.originPoint.y + dly);
       try {
@@ -2857,6 +3291,7 @@ async function init() {
       drag.pathHandleIndex !== undefined
     ) {
       const rect = syncNodeRect(selection);
+      ensureDragPreview();
       const newX = Math.round(event.clientX / camera.z + camera.x - rect.x);
       const newY = Math.round(event.clientY / camera.z + camera.y - rect.y);
       try {
@@ -2981,6 +3416,7 @@ async function init() {
       const delta = drag.activeLayoutHandle.direction === "vertical" ? dy : dx;
       const newValue = Math.max(0, Math.round((drag.originValue ?? 0) + delta));
       drag.activeLayoutHandle.value = newValue;
+      if (dx !== 0 || dy !== 0) ensureDragPreview();
       if (selection.element instanceof HTMLElement) {
         selection.element.style.gap = `${newValue}px`;
       }
@@ -2998,6 +3434,7 @@ async function init() {
       else if (edge === "right") delta = -dx;
       const newValue = Math.max(0, Math.round((drag.originValue ?? 0) + delta));
       drag.activeLayoutHandle.value = newValue;
+      if (dx !== 0 || dy !== 0) ensureDragPreview();
       if (selection.element instanceof HTMLElement) {
         if (edge === "top")
           selection.element.style.paddingTop = `${newValue}px`;
@@ -3029,6 +3466,7 @@ async function init() {
       return;
     }
     if (drag.mode === "pan") {
+      clearBoardSnapshot();
       camera.x -= dx / camera.z;
       camera.y -= dy / camera.z;
       drag.x = event.clientX;
@@ -3267,6 +3705,7 @@ async function init() {
   });
   host.addEventListener("wheel", (event) => {
     event.preventDefault();
+    clearBoardSnapshot();
     const factor = Math.exp(-event.deltaY * 0.0015);
     const next = compositor?.camera.zoomAt(
       factor,
@@ -3367,6 +3806,8 @@ async function init() {
   });
 
   bridge?.onProject((message) => {
+    exitDomBoard();
+    clearBoardSnapshot();
     manifest = message.manifest;
     applyTokensCss(message.files);
     for (const [key, board] of boards) {
@@ -3407,6 +3848,8 @@ async function init() {
 
   bridge?.onPage((pageId) => {
     if (!manifest) return;
+    exitDomBoard();
+    clearBoardSnapshot();
     const page =
       manifest.pages.find((entry) => entry.id === pageId) ?? manifest.pages[0];
     if (!page) return;
@@ -3689,6 +4132,8 @@ async function init() {
   bridge?.onHmr((payload) => {
     if (!manifest) return;
     if (payload.type !== "update" && payload.type !== "full-reload") return;
+    exitDomBoard();
+    clearBoardSnapshot();
     nodeIndex.clear();
     for (const board of boards.values()) {
       board.reactRoot.unmount();

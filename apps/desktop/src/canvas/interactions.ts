@@ -450,150 +450,266 @@ export function renderReferenceLinesOverlay(
   }
 }
 
+interface PersistentRulers {
+  container: HTMLElement;
+  top: HTMLCanvasElement;
+  left: HTMLCanvasElement;
+  corner: HTMLElement;
+  cursorX: HTMLElement;
+  cursorY: HTMLElement;
+  lastDrawKey?: string;
+}
+
+let persistentRulers: PersistentRulers | null = null;
+
+function getOrCreateRulers(overlay: HTMLElement): PersistentRulers {
+  const existingContainer = document.getElementById("rulers");
+  if (existingContainer) {
+    const top = document.getElementById("ruler-top") as HTMLCanvasElement;
+    const left = document.getElementById("ruler-left") as HTMLCanvasElement;
+    const corner = document.getElementById("ruler-corner") as HTMLElement;
+    const cursorX = document.getElementById("ruler-cursor-x") as HTMLElement;
+    const cursorY = document.getElementById("ruler-cursor-y") as HTMLElement;
+    if (top && left && corner && cursorX && cursorY) {
+      if (!persistentRulers || persistentRulers.container !== existingContainer) {
+        persistentRulers = {
+          container: existingContainer,
+          top,
+          left,
+          corner,
+          cursorX,
+          cursorY,
+          lastDrawKey: persistentRulers?.lastDrawKey,
+        };
+      }
+      return persistentRulers;
+    }
+  }
+
+  if (persistentRulers && persistentRulers.container.isConnected) {
+    return persistentRulers;
+  }
+
+  const container = document.createElement("div");
+  container.id = "rulers";
+  container.style.cssText =
+    "position:absolute;inset:0;pointer-events:none;z-index:20;";
+
+  const top = document.createElement("canvas");
+  top.id = "ruler-top";
+  top.style.cssText =
+    "position:absolute;top:0;left:20px;height:20px;pointer-events:none;";
+
+  const left = document.createElement("canvas");
+  left.id = "ruler-left";
+  left.style.cssText =
+    "position:absolute;top:20px;left:0;width:20px;pointer-events:none;";
+
+  const corner = document.createElement("div");
+  corner.id = "ruler-corner";
+  corner.style.cssText =
+    "position:absolute;top:0;left:0;width:20px;height:20px;background:#14141a;border-right:1px solid #2e2e38;border-bottom:1px solid #2e2e38;pointer-events:none;";
+
+  const cursorX = document.createElement("div");
+  cursorX.id = "ruler-cursor-x";
+  cursorX.style.cssText =
+    "position:absolute;top:0;width:1px;height:20px;background:#4c8dff;pointer-events:none;display:none;";
+
+  const cursorY = document.createElement("div");
+  cursorY.id = "ruler-cursor-y";
+  cursorY.style.cssText =
+    "position:absolute;left:0;height:1px;width:20px;background:#4c8dff;pointer-events:none;display:none;";
+
+  container.appendChild(top);
+  container.appendChild(left);
+  container.appendChild(corner);
+  container.appendChild(cursorX);
+  container.appendChild(cursorY);
+
+  if (overlay.parentNode) {
+    overlay.parentNode.insertBefore(container, overlay);
+  } else {
+    overlay.appendChild(container);
+  }
+
+  persistentRulers = { container, top, left, corner, cursorX, cursorY };
+  return persistentRulers;
+}
+
 export function renderRulersOverlay(
   overlay: HTMLElement,
   camera: CameraState,
   mouseClient: { x: number; y: number } | null,
+  visible = true,
 ): void {
+  const rulers = getOrCreateRulers(overlay);
+  if (!visible) {
+    rulers.container.style.display = "none";
+    return;
+  }
+  rulers.container.style.display = "";
+
   const width = overlay.clientWidth;
   const height = overlay.clientHeight;
   if (width <= 20 || height <= 20) return;
 
   const dpr = globalThis.devicePixelRatio || 1;
-  const topCanvas = document.createElement("canvas");
-  topCanvas.className = "canvas-ruler ruler-top";
-  topCanvas.width = Math.round((width - 20) * dpr);
-  topCanvas.height = Math.round(20 * dpr);
-  topCanvas.style.cssText = `position:absolute;top:0;left:20px;width:${width - 20}px;height:20px;pointer-events:none;z-index:20;`;
-
-  const topCtx = topCanvas.getContext("2d");
-  if (topCtx) {
-    topCtx.scale(dpr, dpr);
-    topCtx.fillStyle = "#181820";
-    topCtx.fillRect(0, 0, width - 20, 20);
-    topCtx.strokeStyle = "#3a3a46";
-    topCtx.lineWidth = 1;
-    topCtx.beginPath();
-    topCtx.moveTo(0, 19.5);
-    topCtx.lineTo(width - 20, 19.5);
-    topCtx.stroke();
-
-    const candidateSteps = [
-      1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000,
-    ];
-    let step = 100;
-    for (const s of candidateSteps) {
-      if (s * camera.z >= 45) {
-        step = s;
-        break;
-      }
-    }
-    const subStep = step / 5;
-
-    const minWorldX = camera.x;
-    const maxWorldX = camera.x + (width - 20) / camera.z;
-    const startX = Math.floor(minWorldX / subStep) * subStep;
-
-    topCtx.font = "9px sans-serif";
-    topCtx.textBaseline = "top";
-
-    for (let wx = startX; wx <= maxWorldX + subStep; wx += subStep) {
-      const sx = (wx - camera.x) * camera.z;
-      if (sx < 0 || sx > width - 20) continue;
-      const isMajor = Math.abs(Math.round(wx / step) * step - wx) < 0.001;
-      topCtx.strokeStyle = isMajor ? "#9fa0b2" : "#4a4a58";
-      topCtx.beginPath();
-      topCtx.moveTo(sx + 0.5, isMajor ? 10 : 15);
-      topCtx.lineTo(sx + 0.5, 20);
-      topCtx.stroke();
-
-      if (isMajor) {
-        topCtx.fillStyle = "#d0d2e0";
-        topCtx.fillText(`${Math.round(wx)}`, sx + 3, 2);
-      }
-    }
-
-    if (mouseClient && mouseClient.x >= 20) {
-      topCtx.strokeStyle = "#4c8dff";
-      topCtx.beginPath();
-      topCtx.moveTo(mouseClient.x - 20 + 0.5, 0);
-      topCtx.lineTo(mouseClient.x - 20 + 0.5, 20);
-      topCtx.stroke();
-    }
+  const drawKey = `${camera.x}|${camera.y}|${camera.z}|${width}|${height}|${dpr}`;
+  if (rulers.lastDrawKey !== drawKey) {
+    rulers.lastDrawKey = drawKey;
+    drawTopRuler(rulers.top, width, dpr, camera);
+    drawLeftRuler(rulers.left, height, dpr, camera);
   }
 
-  const leftCanvas = document.createElement("canvas");
-  leftCanvas.className = "canvas-ruler ruler-left";
-  leftCanvas.width = Math.round(20 * dpr);
-  leftCanvas.height = Math.round((height - 20) * dpr);
-  leftCanvas.style.cssText = `position:absolute;top:20px;left:0;width:20px;height:${height - 20}px;pointer-events:none;z-index:20;`;
-
-  const leftCtx = leftCanvas.getContext("2d");
-  if (leftCtx) {
-    leftCtx.scale(dpr, dpr);
-    leftCtx.fillStyle = "#181820";
-    leftCtx.fillRect(0, 0, 20, height - 20);
-    leftCtx.strokeStyle = "#3a3a46";
-    leftCtx.lineWidth = 1;
-    leftCtx.beginPath();
-    leftCtx.moveTo(19.5, 0);
-    leftCtx.lineTo(19.5, height - 20);
-    leftCtx.stroke();
-
-    const candidateSteps = [
-      1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000,
-    ];
-    let step = 100;
-    for (const s of candidateSteps) {
-      if (s * camera.z >= 45) {
-        step = s;
-        break;
-      }
-    }
-    const subStep = step / 5;
-
-    const minWorldY = camera.y;
-    const maxWorldY = camera.y + (height - 20) / camera.z;
-    const startY = Math.floor(minWorldY / subStep) * subStep;
-
-    leftCtx.font = "8px sans-serif";
-    leftCtx.textBaseline = "middle";
-
-    for (let wy = startY; wy <= maxWorldY + subStep; wy += subStep) {
-      const sy = (wy - camera.y) * camera.z;
-      if (sy < 0 || sy > height - 20) continue;
-      const isMajor = Math.abs(Math.round(wy / step) * step - wy) < 0.001;
-      leftCtx.strokeStyle = isMajor ? "#9fa0b2" : "#4a4a58";
-      leftCtx.beginPath();
-      leftCtx.moveTo(isMajor ? 10 : 15, sy + 0.5);
-      leftCtx.lineTo(20, sy + 0.5);
-      leftCtx.stroke();
-
-      if (isMajor) {
-        leftCtx.save();
-        leftCtx.translate(2, sy + 3);
-        leftCtx.rotate(-Math.PI / 2);
-        leftCtx.fillStyle = "#d0d2e0";
-        leftCtx.fillText(`${Math.round(wy)}`, 0, 0);
-        leftCtx.restore();
-      }
-    }
-
-    if (mouseClient && mouseClient.y >= 20) {
-      leftCtx.strokeStyle = "#4c8dff";
-      leftCtx.beginPath();
-      leftCtx.moveTo(0, mouseClient.y - 20 + 0.5);
-      leftCtx.lineTo(20, mouseClient.y - 20 + 0.5);
-      leftCtx.stroke();
-    }
+  if (mouseClient && mouseClient.x >= 20) {
+    rulers.cursorX.style.display = "block";
+    rulers.cursorX.style.left = `${mouseClient.x}px`;
+  } else {
+    rulers.cursorX.style.display = "none";
   }
 
-  const corner = document.createElement("div");
-  corner.className = "canvas-ruler-corner";
-  corner.style.cssText =
-    "position:absolute;top:0;left:0;width:20px;height:20px;background:#14141a;border-right:1px solid #2e2e38;border-bottom:1px solid #2e2e38;pointer-events:none;z-index:21;";
+  if (mouseClient && mouseClient.y >= 20) {
+    rulers.cursorY.style.display = "block";
+    rulers.cursorY.style.top = `${mouseClient.y}px`;
+  } else {
+    rulers.cursorY.style.display = "none";
+  }
+}
 
-  overlay.appendChild(topCanvas);
-  overlay.appendChild(leftCanvas);
-  overlay.appendChild(corner);
+function drawTopRuler(
+  canvas: HTMLCanvasElement,
+  width: number,
+  dpr: number,
+  camera: CameraState,
+): void {
+  const targetW = Math.max(1, Math.round((width - 20) * dpr));
+  const targetH = Math.max(1, Math.round(20 * dpr));
+  if (canvas.width !== targetW || canvas.height !== targetH) {
+    canvas.width = targetW;
+    canvas.height = targetH;
+    canvas.style.width = `${width - 20}px`;
+    canvas.style.height = "20px";
+  }
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.scale(dpr, dpr);
+
+  ctx.fillStyle = "#181820";
+  ctx.fillRect(0, 0, width - 20, 20);
+  ctx.strokeStyle = "#3a3a46";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, 19.5);
+  ctx.lineTo(width - 20, 19.5);
+  ctx.stroke();
+
+  const candidateSteps = [
+    1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000,
+  ];
+  let step = 100;
+  for (const s of candidateSteps) {
+    if (s * camera.z >= 45) {
+      step = s;
+      break;
+    }
+  }
+  const subStep = step / 5;
+
+  const minWorldX = camera.x;
+  const maxWorldX = camera.x + (width - 20) / camera.z;
+  const startX = Math.floor(minWorldX / subStep) * subStep;
+
+  ctx.font = "9px sans-serif";
+  ctx.textBaseline = "top";
+
+  for (let wx = startX; wx <= maxWorldX + subStep; wx += subStep) {
+    const sx = (wx - camera.x) * camera.z;
+    if (sx < 0 || sx > width - 20) continue;
+    const isMajor = Math.abs(Math.round(wx / step) * step - wx) < 0.001;
+    ctx.strokeStyle = isMajor ? "#9fa0b2" : "#4a4a58";
+    ctx.beginPath();
+    ctx.moveTo(sx + 0.5, isMajor ? 10 : 15);
+    ctx.lineTo(sx + 0.5, 20);
+    ctx.stroke();
+
+    if (isMajor) {
+      ctx.fillStyle = "#d0d2e0";
+      ctx.fillText(`${Math.round(wx)}`, sx + 3, 2);
+    }
+  }
+}
+
+function drawLeftRuler(
+  canvas: HTMLCanvasElement,
+  height: number,
+  dpr: number,
+  camera: CameraState,
+): void {
+  const targetW = Math.max(1, Math.round(20 * dpr));
+  const targetH = Math.max(1, Math.round((height - 20) * dpr));
+  if (canvas.width !== targetW || canvas.height !== targetH) {
+    canvas.width = targetW;
+    canvas.height = targetH;
+    canvas.style.width = "20px";
+    canvas.style.height = `${height - 20}px`;
+  }
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.scale(dpr, dpr);
+
+  ctx.fillStyle = "#181820";
+  ctx.fillRect(0, 0, 20, height - 20);
+  ctx.strokeStyle = "#3a3a46";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(19.5, 0);
+  ctx.lineTo(19.5, height - 20);
+  ctx.stroke();
+
+  const candidateSteps = [
+    1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000,
+  ];
+  let step = 100;
+  for (const s of candidateSteps) {
+    if (s * camera.z >= 45) {
+      step = s;
+      break;
+    }
+  }
+  const subStep = step / 5;
+
+  const minWorldY = camera.y;
+  const maxWorldY = camera.y + (height - 20) / camera.z;
+  const startY = Math.floor(minWorldY / subStep) * subStep;
+
+  ctx.font = "8px sans-serif";
+  ctx.textBaseline = "middle";
+
+  for (let wy = startY; wy <= maxWorldY + subStep; wy += subStep) {
+    const sy = (wy - camera.y) * camera.z;
+    if (sy < 0 || sy > height - 20) continue;
+    const isMajor = Math.abs(Math.round(wy / step) * step - wy) < 0.001;
+    ctx.strokeStyle = isMajor ? "#9fa0b2" : "#4a4a58";
+    ctx.beginPath();
+    ctx.moveTo(isMajor ? 10 : 15, sy + 0.5);
+    ctx.lineTo(20, sy + 0.5);
+    ctx.stroke();
+
+    if (isMajor) {
+      ctx.save();
+      ctx.translate(2, sy + 3);
+      ctx.rotate(-Math.PI / 2);
+      ctx.fillStyle = "#d0d2e0";
+      ctx.fillText(`${Math.round(wy)}`, 0, 0);
+      ctx.restore();
+    }
+  }
 }

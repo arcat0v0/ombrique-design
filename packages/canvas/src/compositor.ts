@@ -22,6 +22,7 @@ export interface CompositorStats {
 export interface CompositorOptions {
   onStats?: (stats: CompositorStats) => void;
   onInitialUpload?: (ms: number, count: number) => void;
+  onBoardUploaded?: (el: Element) => void;
   maxTextureBytes?: number;
   minZoom?: number;
   maxZoom?: number;
@@ -46,6 +47,8 @@ export interface Compositor {
   setBoards(boards: BoardInit[]): void;
   uploadAtScale(el: Element, scale: number): boolean;
   setInteractive(active: boolean): void;
+  suspendBoard(el: Element): void;
+  resumeBoard(el: Element): void;
   exportBoard(
     el: Element,
     scale: number,
@@ -134,6 +137,7 @@ interface Board {
   baseReady: boolean;
   zoomCaptureAt: number | null;
   captureZoomPrev: string;
+  suspended: boolean;
 }
 
 function nextFrame(): Promise<void> {
@@ -491,6 +495,7 @@ export async function createCompositor(
     b.bind = bind;
     b.verifyEntry = entry;
     hiResBytes += bytes;
+    opts.onBoardUploaded?.(b.el);
     while (hiResBytes > maxTextureBytes) {
       let oldest: Board | null = null;
       for (const other of boards) {
@@ -614,6 +619,7 @@ export async function createCompositor(
         baseReady: false,
         zoomCaptureAt: null,
         captureZoomPrev: "",
+        suspended: false,
       };
       board.baseBind = bindFor(board, tex);
       board.bind = board.baseBind;
@@ -628,7 +634,7 @@ export async function createCompositor(
 
   function uploadEl(el: Element): void {
     const b = byEl.get(el);
-    if (!b || el.parentElement !== canvas) return;
+    if (!b || b.suspended || el.parentElement !== canvas) return;
     try {
       uploadElementImage(
         { source: el },
@@ -639,6 +645,7 @@ export async function createCompositor(
     }
     if (b.tex === b.baseTex) b.baseReady = true;
     uploadsTotal += 1;
+    opts.onBoardUploaded?.(el);
   }
 
   function onPaint(e: Event): void {
@@ -683,7 +690,7 @@ export async function createCompositor(
     lastT = t;
 
     for (const b of boards) {
-      if (b.pendingScale === null || interactive) continue;
+      if (b.suspended || b.pendingScale === null || interactive) continue;
       if (frameNo <= b.pendingSince) continue;
       applyPendingScale(b);
     }
@@ -737,6 +744,7 @@ export async function createCompositor(
       try {
         const mtx = new DOMMatrix();
         for (const b of boards) {
+          if (b.suspended) continue;
           const sx = (b.x - cam.x) * cam.z;
           const sy = (b.y - cam.y) * cam.z;
           if (
@@ -784,6 +792,7 @@ export async function createCompositor(
     if (destroyed || interactive === active) return;
     interactive = active;
     for (const b of boards) {
+      if (b.suspended) continue;
       b.pendingScale = null;
       releaseCaptureZoom(b);
       if (active) restoreBase(b);
@@ -791,6 +800,29 @@ export async function createCompositor(
     if (active) return;
     for (const b of boards) scheduleScale(b);
     canvas.requestPaint();
+  }
+
+  function suspendBoard(el: Element): void {
+    const b = byEl.get(el);
+    if (!b || destroyed) return;
+    b.suspended = true;
+    b.pendingScale = null;
+    releaseCaptureZoom(b);
+    restoreBase(b);
+  }
+
+  function resumeBoard(el: Element): void {
+    const b = byEl.get(el);
+    if (!b || destroyed) return;
+    b.suspended = false;
+    scheduleScale(b);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (destroyed || b.suspended) return;
+        queue.markDirty(el);
+        canvas.requestPaint();
+      });
+    });
   }
   async function exportBoard(
     el: Element,
@@ -906,6 +938,8 @@ export async function createCompositor(
     setBoards,
     uploadAtScale,
     setInteractive,
+    suspendBoard,
+    resumeBoard,
     exportBoard,
     requestPaint() {
       canvas.requestPaint();

@@ -113,6 +113,7 @@ export interface ResolvedNode {
 }
 
 export interface ShellBridge {
+  platform?: string;
   openProject: () => Promise<string | null>;
   openPath: (path: string) => Promise<string>;
   send: (message: unknown) => Promise<boolean>;
@@ -219,6 +220,16 @@ export interface ShellBridge {
   toggleFullscreen?: () => void;
   toggleDevtools?: () => void;
   reloadRenderer?: () => void;
+  minimizeWindow?: () => void;
+  toggleWindowMaximize?: () => void;
+  closeWindow?: () => void;
+  getWindowState?: () => Promise<{
+    maximized: boolean;
+    fullscreen: boolean;
+  }>;
+  onWindowState?: (
+    cb: (state: { maximized: boolean; fullscreen: boolean }) => void,
+  ) => void;
   sendPrototypeMode?: (active: boolean) => void;
   sendShowHotspots?: (show: boolean) => void;
   onPrototypeModeChanged?: (cb: (active: boolean) => void) => void;
@@ -304,6 +315,7 @@ const INITIAL: ShellViewWithTokens = {
   zoom: 1,
   busy: false,
   notice: null,
+  windowMaximized: false,
   activeTool: "select",
   tokens: [],
   prototypeMode: false,
@@ -399,7 +411,9 @@ export function toSummary(node: ResolvedNode): SelectionSummary {
 export function createShellState() {
   const bridge = (window as unknown as { ombriqueShell?: ShellBridge })
     .ombriqueShell;
-  let view: ShellViewWithTokens = INITIAL;
+  let view: ShellViewWithTokens = bridge?.platform
+    ? { ...INITIAL, platform: bridge.platform }
+    : INITIAL;
   let files: Record<string, string> = {};
   let selected: ResolvedNode | null = null;
   let clipboard: ResolvedNode[] = [];
@@ -1265,6 +1279,15 @@ export function createShellState() {
     reloadRenderer: () => {
       bridge?.reloadRenderer?.();
     },
+    minimizeWindow: () => {
+      bridge?.minimizeWindow?.();
+    },
+    toggleWindowMaximize: () => {
+      bridge?.toggleWindowMaximize?.();
+    },
+    closeWindow: () => {
+      bridge?.closeWindow?.();
+    },
     addPage: () => {
       void sendCommands([
         { kind: "addPage", name: `Page ${view.pages.length + 1}` },
@@ -1810,6 +1833,15 @@ export function createShellState() {
     });
     bridge.onFatal((message) => set({ notice: `文档服务错误：${message}` }));
     bridge.onStats((stats) => set({ stats }));
+    bridge.onWindowState?.((state) =>
+      set({ windowMaximized: Boolean(state.maximized) }),
+    );
+    const windowState = bridge.getWindowState?.();
+    if (windowState) {
+      void windowState.then((state) => {
+        if (state) set({ windowMaximized: Boolean(state.maximized) });
+      });
+    }
     bridge.onSelectionChanged?.((payload) => {
       if (!payload) {
         selected = null;

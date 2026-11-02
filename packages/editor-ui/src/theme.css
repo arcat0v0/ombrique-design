@@ -123,6 +123,24 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+.app-titlebar {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+.app-titlebar button,
+.app-titlebar input,
+.app-titlebar textarea,
+.app-titlebar select,
+.app-titlebar a,
+.app-titlebar [role="button"],
+.app-titlebar [role="menuitem"],
+.app-titlebar [role="tab"],
+.app-titlebar [role="combobox"] {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
 *, *::before, *::after {
   box-sizing: border-box;
 }

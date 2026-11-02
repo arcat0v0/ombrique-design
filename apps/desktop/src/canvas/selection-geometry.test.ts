@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { worldRectFromClientRect } from "./selection-geometry";
+import { resolveParentOrigin, worldRectFromClientRect } from "./selection-geometry";
 
 const rect = (left: number, top: number, width: number, height: number) => ({
   left,
@@ -141,5 +141,42 @@ describe("worldRectFromClientRect", () => {
     expect(world).toEqual({ x: 1564, y: 32, width: 120, height: 80 });
     expect(world.x - reference.origin.x).toBe(64);
     expect(zoom * world.x).toBe(4692);
+  });
+
+  describe("resolveParentOrigin", () => {
+    it("returns boardOrigin for direct children of board", () => {
+      const board = document.createElement("section");
+      board.className = "board";
+      const directChild = document.createElement("div");
+      board.appendChild(directChild);
+      document.body.appendChild(board);
+
+      const origin = resolveParentOrigin(directChild, { x: 100, y: 50 }, () => ({
+        x: 0,
+        y: 0,
+        width: 0,
+        height: 0,
+      }));
+      expect(origin).toEqual({ x: 100, y: 50 });
+      board.remove();
+    });
+
+    it("returns parent frame world coordinate for nested children", () => {
+      const board = document.createElement("section");
+      board.className = "board";
+      const card = document.createElement("div");
+      card.className = "card";
+      const title = document.createElement("p");
+      card.appendChild(title);
+      board.appendChild(card);
+      document.body.appendChild(board);
+
+      const origin = resolveParentOrigin(title, { x: 100, y: 50 }, (el) => {
+        if (el === card) return { x: 340, y: 580, width: 350, height: 210 };
+        return { x: 0, y: 0, width: 0, height: 0 };
+      });
+      expect(origin).toEqual({ x: 340, y: 580 });
+      board.remove();
+    });
   });
 });

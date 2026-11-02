@@ -21,6 +21,37 @@ describe("Shell", () => {
     expect(queryByLabelText("撤销")).toBeNull();
   });
 
+  it("shows window controls only on Linux and routes window actions", () => {
+    const minimizeWindow = vi.fn();
+    const toggleWindowMaximize = vi.fn();
+    const closeWindow = vi.fn();
+    const { getByLabelText, rerender, queryByLabelText } = render(
+      <Shell
+        view={makeView({ platform: "linux" })}
+        actions={makeActions({
+          minimizeWindow,
+          toggleWindowMaximize,
+          closeWindow,
+        })}
+      />,
+    );
+
+    fireEvent.click(getByLabelText("最小化"));
+    fireEvent.click(getByLabelText("最大化"));
+    fireEvent.click(getByLabelText("关闭"));
+    expect(minimizeWindow).toHaveBeenCalledTimes(1);
+    expect(toggleWindowMaximize).toHaveBeenCalledTimes(1);
+    expect(closeWindow).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <Shell
+        view={makeView({ platform: "darwin" })}
+        actions={makeActions()}
+      />,
+    );
+    expect(queryByLabelText("最小化")).toBeNull();
+  });
+
   it("shows diagnostics count and notice from the view", () => {
     const { getByText, getByLabelText } = render(
       <Shell
@@ -45,6 +76,9 @@ describe("Shell", () => {
     const deleteSelection = vi.fn();
     const groupSelection = vi.fn();
     const ungroupSelection = vi.fn();
+    const toggleHidden = vi.fn();
+    const toggleLocked = vi.fn();
+    const zoomToFit = vi.fn();
 
     render(
       <Shell
@@ -66,6 +100,9 @@ describe("Shell", () => {
           deleteSelection,
           groupSelection,
           ungroupSelection,
+          toggleHidden,
+          toggleLocked,
+          zoomToFit,
         })}
       />,
     );
@@ -101,6 +138,21 @@ describe("Shell", () => {
       new KeyboardEvent("keydown", { key: "g", metaKey: true, shiftKey: true }),
     );
     expect(ungroupSelection).toHaveBeenCalledTimes(1);
+
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "h", ctrlKey: true, shiftKey: true }),
+    );
+    expect(toggleHidden).toHaveBeenCalledTimes(1);
+
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "l", ctrlKey: true, shiftKey: true }),
+    );
+    expect(toggleLocked).toHaveBeenCalledTimes(1);
+
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "1", shiftKey: true }),
+    );
+    expect(zoomToFit).toHaveBeenCalledTimes(1);
   });
 
   it("ignores shortcuts while typing in an input", () => {

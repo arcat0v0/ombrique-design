@@ -28,6 +28,7 @@ import {
 export interface ViewMenuProps {
   zoom: number;
   busy?: boolean;
+  alignOffset?: number;
   onZoomTo?: (factor: number) => void;
   onZoomToFit: () => void;
   onToggleFullscreen?: () => void;
@@ -38,6 +39,7 @@ export interface ViewMenuProps {
 export function ViewMenu({
   zoom,
   busy = false,
+  alignOffset = 0,
   onZoomTo,
   onZoomToFit,
   onToggleFullscreen,
@@ -66,7 +68,11 @@ export function ViewMenu({
         </TooltipTrigger>
         <TooltipContent side="bottom">视图与缩放</TooltipContent>
       </Tooltip>
-      <DropdownMenuContent align="end" className="w-52 p-1.5">
+      <DropdownMenuContent
+        align="end"
+        alignOffset={alignOffset}
+        className="w-44 p-1.5 shadow-lg"
+      >
         <DropdownMenuLabel>视图</DropdownMenuLabel>
         <DropdownMenuItem
           disabled={busy || !onZoomTo}

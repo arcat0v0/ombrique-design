@@ -32,10 +32,18 @@
         height: 100%;
         display: block;
       }
+      #stage-dom {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+        pointer-events: none;
+        z-index: 5;
+      }
       #overlay {
         position: absolute;
         inset: 0;
         pointer-events: none;
+        z-index: 10;
       }
       .selection-box {
         position: absolute;
@@ -46,6 +54,13 @@
   </head>
   <body>
     <canvas id="cv" content="drawable"></canvas>
+    <div id="rulers" style="position:absolute;inset:0;pointer-events:none;z-index:20">
+      <canvas id="ruler-top" style="position:absolute;top:0;left:20px;height:20px;pointer-events:none;"></canvas>
+      <canvas id="ruler-left" style="position:absolute;top:20px;left:0;width:20px;pointer-events:none;"></canvas>
+      <div id="ruler-corner" style="position:absolute;top:0;left:0;width:20px;height:20px;background:#14141a;border-right:1px solid #2e2e38;border-bottom:1px solid #2e2e38;pointer-events:none;"></div>
+      <div id="ruler-cursor-x" style="position:absolute;top:0;width:1px;height:20px;background:#4c8dff;pointer-events:none;display:none;"></div>
+      <div id="ruler-cursor-y" style="position:absolute;left:0;height:1px;width:20px;background:#4c8dff;pointer-events:none;display:none;"></div>
+    </div>
     <div id="overlay"></div>
     <script type="module" src="/canvas-runtime.js"></script>
   </body>

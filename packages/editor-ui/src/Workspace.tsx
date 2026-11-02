@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { RecentProject } from "@ombrique/protocol";
 import {
   ArrowUpRightIcon,
@@ -36,6 +36,8 @@ export interface WorkspaceProps {
   onOpenExample?: () => void;
   onRemoveRecent?: (root: string) => void;
   onDismissNotice?: () => void;
+  windowControls?: ReactNode;
+  titleBarDrag?: boolean;
 }
 
 export function formatRelativeTime(
@@ -241,6 +243,8 @@ export function Workspace({
   onOpenExample,
   onRemoveRecent,
   onDismissNotice,
+  windowControls,
+  titleBarDrag = false,
 }: WorkspaceProps) {
   const [query, setQuery] = useState("");
   const loading = recentProjects === undefined;
@@ -277,7 +281,12 @@ export function Workspace({
   return (
     <TooltipProvider delayDuration={200}>
       <div className="workspace flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
-        <header className="flex h-11 shrink-0 items-center justify-between border-b border-border/70 bg-card/40 px-4">
+        <header
+          className={cn(
+            "flex h-11 shrink-0 items-center justify-between border-b border-border/70 bg-card/40 pl-4",
+            titleBarDrag && "app-titlebar",
+          )}
+        >
           <div className="flex items-center gap-2.5">
             <span className="flex size-6 items-center justify-center rounded-md bg-primary text-primary-foreground shadow-sm">
               <BoxIcon className="size-3.5" />
@@ -290,9 +299,15 @@ export function Workspace({
               Workspace
             </span>
           </div>
-          <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+          <div
+            className={cn(
+              "flex h-full items-center gap-2 text-[11px] text-muted-foreground",
+              windowControls ? "pr-1" : "pr-4",
+            )}
+          >
             <span className="size-1.5 rounded-full bg-emerald-400/80" />
             <span>本地工作区 · 源码即设计</span>
+            {windowControls}
           </div>
         </header>
 

@@ -59,6 +59,9 @@ const preloadDir = join(here, "../preload");
 app.commandLine.appendSwitch("enable-blink-features", "CanvasDrawElement");
 app.commandLine.appendSwitch("enable-unsafe-webgpu");
 app.commandLine.appendSwitch("use-webgpu-adapter", "vulkan");
+if (process.platform === "linux") {
+  app.commandLine.appendSwitch("enable-features", "Vulkan");
+}
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -423,12 +426,14 @@ function ensureCanvasView(): WebContentsView | null {
 }
 
 function createShellWindow() {
+  const linux = process.platform === "linux";
   shellWindow = new BrowserWindow({
     width: 1680,
     height: 1020,
     minWidth: 1200,
     minHeight: 720,
-    frame: true,
+    frame: !linux,
+    hasShadow: !linux,
     title: "Ombrique",
     backgroundColor: "#0e0e12",
     webPreferences: {
@@ -446,6 +451,16 @@ ipcMain.on("ombrique:windowControl", (_event, action: string) => {
   const win = BrowserWindow.fromWebContents(_event.sender) ?? shellWindow;
   if (!win) return;
   switch (action) {
+    case "minimize":
+      win.minimize();
+      break;
+    case "toggleMaximize":
+      if (win.isMaximized()) win.unmaximize();
+      else win.maximize();
+      break;
+    case "close":
+      win.close();
+      break;
     case "toggleFullscreen":
       win.setFullScreen(!win.isFullScreen());
       break;
@@ -456,6 +471,18 @@ ipcMain.on("ombrique:windowControl", (_event, action: string) => {
       win.webContents.reload();
       break;
   }
+});
+
+function windowStateOf(win: BrowserWindow): {
+  maximized: boolean;
+  fullscreen: boolean;
+} {
+  return { maximized: win.isMaximized(), fullscreen: win.isFullScreen() };
+}
+
+ipcMain.handle("ombrique:getWindowState", (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender) ?? shellWindow;
+  return win ? windowStateOf(win) : { maximized: false, fullscreen: false };
 });
 
 if (process.platform === "darwin") {
@@ -477,6 +504,14 @@ function createShellWindowContents() {
   }
 
   win.on("resize", layoutCanvas);
+  const publishWindowState = () => {
+    if (win.isDestroyed()) return;
+    win.webContents.send("ombrique:windowState", windowStateOf(win));
+  };
+  win.on("maximize", publishWindowState);
+  win.on("unmaximize", publishWindowState);
+  win.on("enter-full-screen", publishWindowState);
+  win.on("leave-full-screen", publishWindowState);
   win.webContents.on("before-input-event", (event, input) => {
     if (input.type !== "keyDown") return;
     if (input.key === "F11") {
@@ -767,6 +802,13 @@ ipcMain.on(
 ipcMain.on(
   "ombrique:fromCanvas",
   (event, payload: { channel: string; payload: unknown }) => {
+    if (payload.channel === "ombrique:canvasAction") {
+      const action = payload.payload as { kind: string } | null;
+      if (action?.kind === "undo" || action?.kind === "redo") {
+        ensureDocHost().send({ type: "shell", message: { kind: action.kind } });
+        return;
+      }
+    }
     if (payload.channel === "ombrique:canvasReady") {
       if (!canvasView || event.sender !== canvasView.webContents) return;
       canvasReady = true;

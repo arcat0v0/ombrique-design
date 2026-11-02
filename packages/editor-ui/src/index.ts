@@ -1,5 +1,7 @@
 export { Shell } from "./Shell";
 export type { ShellProps } from "./Shell";
+export { WindowControls } from "./WindowControls";
+export type { WindowControlsProps } from "./WindowControls";
 export { Workspace, formatRelativeTime } from "./Workspace";
 export type { WorkspaceProps } from "./Workspace";
 export { AssetsPanel } from "./AssetsPanel";
