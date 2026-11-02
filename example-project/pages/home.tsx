@@ -1,4 +1,4 @@
-import { Frame, Rect, Text, Ellipse } from "@ombrique/runtime";
+import { Frame, Rect, Text, Ellipse, Star } from "@ombrique/runtime";
 
 export default function Home() {
   return (
