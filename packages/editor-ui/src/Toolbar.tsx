@@ -135,7 +135,7 @@ export function Toolbar({
   return (
     <TooltipProvider delayDuration={200}>
       <div
-        className={`flex h-10 w-full items-center justify-between border-b border-border bg-card/80 px-2.5 backdrop-blur-xs select-none ${titleBarDrag ? "app-titlebar" : ""}`}
+        className={`flex h-10 w-full items-center justify-between bg-[#0a0a0a] px-3 select-none ${titleBarDrag ? "app-titlebar" : ""}`}
       >
         <div className="flex items-center gap-1">
           <ApplicationMenu
@@ -391,7 +391,7 @@ export function Toolbar({
                       value={componentName}
                       onChange={(e) => setComponentName(e.target.value)}
                       placeholder="MyComponent"
-                      className="h-8 font-mono text-xs"
+                      className="h-8 text-xs"
                       autoFocus
                     />
                   </div>
@@ -475,7 +475,7 @@ export function Toolbar({
                   <ArchiveIcon className="size-3.5 mr-2" />
                   <div className="flex flex-col gap-0.5">
                     <span>打包项目为 .ombrique</span>
-                    <span className="text-[10px] text-muted-foreground">
+                    <span className="text-[11px] text-muted-foreground">
                       生成单个离线分发包
                     </span>
                   </div>
@@ -540,18 +540,18 @@ export function Toolbar({
             <>
               <Separator orientation="vertical" className="mx-1 h-4" />
               <div
-                className="flex items-center gap-1.5 text-xs font-mono text-muted-foreground"
+                className="flex items-center gap-1.5 text-xs tabular-nums text-muted-foreground"
                 title="画布统计"
               >
                 <Badge
                   variant="secondary"
-                  className="h-5 px-1.5 text-[10px] font-medium"
+                  className="h-5 px-1.5 text-[11px] font-medium tabular-nums"
                 >
                   {stats.fps} FPS
                 </Badge>
                 <Badge
                   variant="outline"
-                  className="h-5 px-1.5 text-[10px] font-medium"
+                  className="h-5 px-1.5 text-[11px] font-medium tabular-nums"
                 >
                   可见 {stats.visible}
                 </Badge>

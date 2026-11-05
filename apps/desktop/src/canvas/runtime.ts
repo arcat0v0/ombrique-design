@@ -30,6 +30,7 @@ import {
   type ShaderInit,
 } from "@ombrique/canvas";
 import { collectShaderBoards, layoutShaderAnchors } from "./shader-placement";
+import { resolveCanvasTool } from "./tool-change";
 import {
   type LayoutHandle,
   type PaddingEdge,
@@ -263,7 +264,7 @@ let activeReferenceLine: ReferenceLine | null = null;
 let activeLayoutHandle: LayoutHandle | null = null;
 let prototypeMode = false;
 let showHotspots = false;
-let showRulers = true;
+let showRulers = false;
 const prototypeHistory: string[] = [];
 let prototypeFlashTimer: number | undefined;
 let prototypeHotspotsFlashing = false;
@@ -2921,7 +2922,7 @@ async function init() {
   };
   activateTool = (tool: CanvasTool) => {
     toolMode = tool;
-    bridge?.send("ombrique:toolChanged", { tool });
+    bridge?.send("ombrique:toolChanged", tool);
     renderToolSwitcher();
   };
   renderToolSwitcher();
@@ -4277,18 +4278,8 @@ async function init() {
       return;
     }
     if (command?.channel === "ombrique:toolChanged") {
-      const tool = command.payload as CanvasTool | null;
-      if (
-        tool === "select" ||
-        tool === "hand" ||
-        tool === "frame" ||
-        tool === "rect" ||
-        tool === "ellipse" ||
-        tool === "star" ||
-        tool === "pen" ||
-        tool === "text" ||
-        tool === "comment"
-      ) {
+      const tool = resolveCanvasTool(command.payload);
+      if (tool) {
         toolMode = tool;
         renderToolSwitcher();
       }

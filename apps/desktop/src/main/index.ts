@@ -52,6 +52,7 @@ import {
 } from "./recent-projects";
 import { scaffoldProject } from "./project-scaffold";
 import { AgentBridge } from "./agent-bridge";
+import { resolveCanvasTool } from "../canvas/tool-change";
 
 const here = __dirname;
 const rendererDir = join(here, "../renderer");
@@ -342,7 +343,7 @@ function applyCanvasBounds(bounds: CanvasBounds) {
   const y = Math.max(0, Math.round(bounds.y * zoom));
   const width = Math.round(bounds.width * zoom);
   const height = Math.round(bounds.height * zoom);
-  if (width < 320 || height < 240 || x < 120) return;
+  if (width < 320 || height < 240) return;
   canvasView.setBounds({ x, y, width, height });
 }
 
@@ -390,10 +391,10 @@ function layoutCanvas() {
   const width = size[0] ?? 1680;
   const height = size[1] ?? 1020;
   const bounds = {
-    x: 240,
+    x: 48,
     y: 40,
-    width: width - 240 - 280,
-    height: height - 40 - 28,
+    width: width - 48,
+    height: height - 40,
   };
   lastCanvasBounds = bounds;
   applyCanvasBounds(bounds);
@@ -829,18 +830,8 @@ ipcMain.on(
       return;
     }
     if (payload.channel === "ombrique:toolChanged") {
-      const tool = (payload.payload as { tool?: string } | null)?.tool;
-      if (
-        tool === "select" ||
-        tool === "hand" ||
-        tool === "frame" ||
-        tool === "rect" ||
-        tool === "ellipse" ||
-        tool === "star" ||
-        tool === "pen" ||
-        tool === "text" ||
-        tool === "comment"
-      ) {
+      const tool = resolveCanvasTool(payload.payload);
+      if (tool) {
         shellWindow?.webContents.send("ombrique:fromShellTool", tool);
       }
       return;
@@ -1412,8 +1403,13 @@ if (process.env.OMBRIQUE_E2E) {
     if (shellWindow) {
       await shellWindow.webContents
         .executeJavaScript(`
-        const layer = document.querySelector(".layer-row");
-        if (layer) layer.click();
+        (async () => {
+          const layersTab = document.querySelector('button[aria-label="图层"]');
+          if (layersTab && !document.querySelector('[aria-label="图层面板"]')) layersTab.click();
+          await new Promise(resolve => setTimeout(resolve, 300));
+          const layer = document.querySelector(".layer-row");
+          if (layer) layer.click();
+        })()
       `)
         .catch(() => {});
       await wait(1500);
@@ -2840,6 +2836,9 @@ export default function Home() {
         const clickResult = await shellWindow.webContents
           .executeJavaScript(`
           (async () => {
+            const layersTab = document.querySelector('button[aria-label="图层"]');
+            if (layersTab && !document.querySelector('[aria-label="图层面板"]')) layersTab.click();
+            await new Promise(r => setTimeout(r, 300));
             const rows = Array.from(document.querySelectorAll(".layer-row"));
             const target = rows.find(r => r.textContent?.includes("Design in code"));
             if (!target) return { ok: false, reason: "layer row not found" };
@@ -2962,6 +2961,9 @@ export default function Home() {
         const dupResult = await shellWindow.webContents
           .executeJavaScript(`
           (async () => {
+            const layersTab = document.querySelector('button[aria-label="图层"]');
+            if (layersTab && !document.querySelector('[aria-label="图层面板"]')) layersTab.click();
+            await new Promise(r => setTimeout(r, 300));
             const rows = Array.from(document.querySelectorAll(".layer-row"));
             const target = rows.find(r => r.textContent?.includes("Design in code"));
             if (!target) return { ok: false, reason: "row missing" };
@@ -3040,6 +3042,9 @@ export default function Home() {
         const addPageResult = await shellWindow.webContents
           .executeJavaScript(`
           (async () => {
+            const pagesTab = document.querySelector('button[aria-label="页面"]');
+            if (pagesTab && !document.querySelector('[aria-label="页面面板"]')) pagesTab.click();
+            await new Promise(r => setTimeout(r, 300));
             const addBtn = document.querySelector('button[aria-label="添加页面"]') ;
             if (!addBtn) return { ok: false, reason: "add page button not found" };
             addBtn.click();
@@ -3213,7 +3218,12 @@ export default function Home() {
         log("canvas pointer drag changes source", dragChangedSource);
         const selectedAfterDrag = await shellWindow.webContents
           .executeJavaScript(`
-          Boolean(document.querySelector(".layer-row.layer-row-selected"))
+          (async () => {
+            const layersTab = document.querySelector('button[aria-label="图层"]');
+            if (layersTab && !document.querySelector('[aria-label="图层面板"]')) layersTab.click();
+            await new Promise(r => setTimeout(r, 300));
+            return Boolean(document.querySelector(".layer-row.layer-row-selected"));
+          })()
         `)
           .catch(() => false);
         log("canvas click selects node in layers", selectedAfterDrag === true);
@@ -3375,6 +3385,9 @@ export default function Home() {
         shellWeb
           ?.executeJavaScript(
             `(async () => {
+              const layersTab = document.querySelector('button[aria-label="图层"]');
+              if (layersTab && !document.querySelector('[aria-label="图层面板"]')) layersTab.click();
+              await new Promise((r) => setTimeout(r, 300));
               const rows = Array.from(document.querySelectorAll(".layer-row"));
               const row = rows.find((r) => r.textContent?.includes(${JSON.stringify(name)}));
               if (!row) return false;

@@ -58,7 +58,7 @@ export function ViewMenu({
               aria-label="视图与缩放"
               title="视图与缩放"
               disabled={busy}
-              className="h-7 gap-1 px-1.5 text-xs font-mono font-normal tabular-nums"
+              className="h-7 gap-1 px-1.5 text-xs font-normal tabular-nums"
             >
               <MonitorIcon className="size-3.5 text-muted-foreground" />
               <span>{Math.round(zoom * 100)}%</span>

@@ -18,11 +18,11 @@ export function DiagnosticsBar({
     diagnostics.length > 0 ? diagnostics[diagnostics.length - 1] : undefined;
 
   return (
-    <footer className="diagnostics-bar flex h-7 items-center justify-between border-t border-border bg-card/90 px-3 text-xs select-none">
+    <footer className="diagnostics-bar flex items-center justify-between text-xs select-none">
       <div className="flex items-center gap-2 overflow-hidden">
         <Badge
           variant="outline"
-          className="diagnostics-count h-5 px-1.5 text-[10px] font-mono font-medium text-muted-foreground"
+          className="diagnostics-count h-5 px-1.5 text-[11px] font-medium tabular-nums text-muted-foreground"
         >
           {diagnostics.length} 条诊断
         </Badge>

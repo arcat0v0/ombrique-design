@@ -21,6 +21,147 @@ describe("Shell", () => {
     expect(queryByLabelText("撤销")).toBeNull();
   });
 
+  it("keeps both side panels collapsed by default for a full-bleed canvas", () => {
+    const { getByLabelText, queryByLabelText, queryByText } = render(
+      <Shell view={makeView()} actions={makeActions()} />,
+    );
+
+    expect(queryByLabelText("页面列表")).toBeNull();
+    expect(queryByLabelText("图层树")).toBeNull();
+    expect(queryByText("未选中图层")).toBeDefined();
+    expect(getByLabelText("展开面板")).toBeDefined();
+  });
+
+  it("opens the pages drawer from the rail and switches to another drawer tab", () => {
+    const { getByLabelText, getAllByText } = render(
+      <Shell
+        view={makeView({
+          pages: [{ id: "home", name: "Home" }],
+          activePageId: "home",
+        })}
+        actions={makeActions()}
+      />,
+    );
+
+    fireEvent.click(getByLabelText("页面"));
+    expect(getByLabelText("页面列表")).toBeDefined();
+    expect(getAllByText("Home").length).toBeGreaterThan(0);
+
+    fireEvent.click(getByLabelText("设计变量"));
+    expect(getAllByText("设计变量").length).toBeGreaterThan(0);
+  });
+
+  it("reports full-bleed canvas bounds even when the narrow rail is present", () => {
+    const updateCanvasBounds = vi.fn();
+    const bounds = new DOMRect(48, 40, 1392, 860);
+    const getBoundingClientRect = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockReturnValue(bounds as DOMRect);
+
+    render(
+      <Shell view={makeView()} actions={makeActions({ updateCanvasBounds })} />,
+    );
+
+    expect(updateCanvasBounds).toHaveBeenCalledWith({
+      x: 48,
+      y: 40,
+      width: 1392,
+      height: 860,
+    });
+    getBoundingClientRect.mockRestore();
+  });
+
+  it("shows the properties inspector only while a layer is selected", () => {
+    const { getByLabelText, getAllByLabelText, queryByLabelText, rerender } =
+      render(<Shell view={makeView()} actions={makeActions()} />);
+
+    expect(queryByLabelText("名称")).toBeNull();
+
+    rerender(
+      <Shell
+        view={makeView({
+          selection: {
+            id: "l1",
+            name: "Title",
+            tag: "text",
+            editable: true,
+            styles: [],
+            attrs: [],
+            text: "Hello",
+          },
+        })}
+        actions={makeActions()}
+      />,
+    );
+    expect(getByLabelText("名称")).toBeDefined();
+    fireEvent.click(getAllByLabelText("隐藏属性面板")[0] as HTMLElement);
+    expect(queryByLabelText("名称")).toBeNull();
+
+    rerender(
+      <Shell
+        view={makeView({
+          selection: {
+            id: "l2",
+            name: "Card",
+            tag: "Frame",
+            editable: true,
+            styles: [],
+            attrs: [],
+            text: null,
+          },
+        })}
+        actions={makeActions()}
+      />,
+    );
+    expect(getByLabelText("名称")).toBeDefined();
+  });
+
+  it("opens the requested left drawer for comments and inline layer rename", () => {
+    const { getByLabelText, rerender } = render(
+      <Shell
+        view={makeView({ commentsTabRequest: 1 })}
+        actions={makeActions()}
+      />,
+    );
+    expect(getByLabelText("评论面板")).toBeDefined();
+
+    rerender(
+      <Shell
+        view={makeView({
+          renameRequest: 1,
+          selection: {
+            id: "l1",
+            name: "Title",
+            tag: "text",
+            editable: true,
+            styles: [],
+            attrs: [],
+            text: "Hello",
+          },
+        })}
+        actions={makeActions()}
+      />,
+    );
+    expect(getByLabelText("图层树")).toBeDefined();
+  });
+
+  it("keeps diagnostics and notices reachable without a status bar", () => {
+    const { getByText, getByLabelText } = render(
+      <Shell
+        view={makeView({
+          diagnostics: [
+            { file: "App.tsx", message: "类型错误", severity: "error" },
+          ],
+          notice: "已打开项目",
+        })}
+        actions={makeActions()}
+      />,
+    );
+    expect(getByText("1 条诊断")).toBeDefined();
+    expect(getByText("已打开项目")).toBeDefined();
+    expect(getByLabelText("关闭通知")).toBeDefined();
+  });
+
   it("shows window controls only on Linux and routes window actions", () => {
     const minimizeWindow = vi.fn();
     const toggleWindowMaximize = vi.fn();
@@ -44,10 +185,7 @@ describe("Shell", () => {
     expect(closeWindow).toHaveBeenCalledTimes(1);
 
     rerender(
-      <Shell
-        view={makeView({ platform: "darwin" })}
-        actions={makeActions()}
-      />,
+      <Shell view={makeView({ platform: "darwin" })} actions={makeActions()} />,
     );
     expect(queryByLabelText("最小化")).toBeNull();
   });
@@ -215,7 +353,7 @@ describe("Shell", () => {
     expect(ungroupBtn.disabled).toBe(false);
   });
 
-  it("switches between Layers and Tokens tabs in the left panel", () => {
+  it("switches between Layers and Tokens tabs in an expanded drawer", () => {
     const tokens = [
       { name: "--brand-primary", value: "#0077ff", category: "color" },
     ];
@@ -223,12 +361,13 @@ describe("Shell", () => {
       <Shell view={makeView({ tokens })} actions={makeActions()} />,
     );
 
-    const tokensTabBtn = getByLabelText("查看设计变量");
+    fireEvent.click(getByLabelText("展开面板"));
+    const tokensTabBtn = getByLabelText("设计变量");
     fireEvent.click(tokensTabBtn);
 
     expect(getByText("--brand-primary")).toBeDefined();
 
-    const layersTabBtn = getByLabelText("查看图层列表");
+    const layersTabBtn = getByLabelText("图层");
     fireEvent.click(layersTabBtn);
 
     expect(getByLabelText("图层树")).toBeDefined();

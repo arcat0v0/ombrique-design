@@ -88,8 +88,8 @@ export function PagesPanel({
       className="pages-panel flex flex-col bg-card/40 select-none"
       aria-label="页面列表"
     >
-      <div className="panel-heading flex h-8 items-center justify-between px-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-        <span>页面</span>
+      <div className="panel-heading flex h-9 items-center justify-between px-3 text-xs font-medium text-[#b4b4b4]">
+        <span>所有页面</span>
         <Button
           type="button"
           variant="ghost"

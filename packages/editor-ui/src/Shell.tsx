@@ -5,28 +5,25 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import {
-  ClockIcon,
-  CoinsIcon,
-  ComponentIcon,
-  HistoryIcon,
-  LayersIcon,
-  MessageSquareIcon,
-} from "lucide-react";
+import { SlidersHorizontalIcon, SparklesIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  ResizableHandle,
-  ResizablePanel,
-  ResizablePanelGroup,
-} from "@/components/ui/resizable";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { CanvasControls } from "./CanvasControls";
 import { cn } from "@/lib/utils";
 import { DiagnosticsBar } from "./DiagnosticsBar";
+import {
+  EditorRail,
+  InspectorDrawer,
+  LeftDrawer,
+  PagesDrawer,
+  useEditorWorkspace,
+  type DrawerTab,
+} from "./EditorWorkspace";
 import { LayersPanel } from "./LayersPanel";
 import { AssetsPanel } from "./AssetsPanel";
 import { PagesPanel } from "./PagesPanel";
@@ -102,11 +99,16 @@ function EditorShell({
   windowControls,
 }: ShellProps & { windowControls?: ReactNode }) {
   const canvasMountRef = useRef<HTMLDivElement>(null);
-  const [leftTab, setLeftTab] = useState<
-    "layers" | "assets" | "tokens" | "history" | "transactions" | "comments"
-  >("layers");
   const [renameLayerId, setRenameLayerId] = useState<string | null>(null);
   const activeTool = view.activeTool ?? "select";
+  const selectionId = view.selection?.id;
+  const { state, setDrawerTab, hideInspector, showInspector } =
+    useEditorWorkspace(
+      view.commentsTabRequest,
+      view.renameRequest,
+      selectionId,
+      view.activeTool,
+    );
 
   const handleGroup = useCallback(() => {
     if (!view.selection?.editable) return;
@@ -155,7 +157,7 @@ function EditorShell({
       const isJSDOM =
         typeof navigator !== "undefined" &&
         navigator.userAgent.includes("jsdom");
-      if (!isJSDOM && (rect.width < 200 || rect.height < 150 || rect.x < 120)) {
+      if (!isJSDOM && (rect.width < 200 || rect.height < 150)) {
         return;
       }
       actions.updateCanvasBounds?.({
@@ -179,18 +181,104 @@ function EditorShell({
   }, [actions.updateCanvasBounds]);
 
   useEffect(() => {
-    if (view.commentsTabRequest) setLeftTab("comments");
-  }, [view.commentsTabRequest]);
-
-  useEffect(() => {
-    if (view.activeTool === "comment") setLeftTab("comments");
-  }, [view.activeTool]);
-
-  useEffect(() => {
     if (!view.renameRequest) return;
-    setLeftTab("layers");
     if (view.selection?.id) setRenameLayerId(view.selection.id);
   }, [view.renameRequest, view.selection]);
+
+  const renderDrawerContent = (tab: Exclude<DrawerTab, "pages">) => {
+    switch (tab) {
+      case "layers":
+        return (
+          <LayersPanel
+            layers={view.layers}
+            selectedLayerId={view.selection?.id ?? null}
+            onSelectLayer={actions.selectLayer}
+            onSetName={actions.setName}
+            onRenameLayer={actions.renameLayer}
+            onToggleHidden={actions.toggleHidden}
+            onToggleLocked={actions.toggleLocked}
+            onToggleHiddenForLayer={actions.toggleHiddenForLayer}
+            onToggleLockedForLayer={actions.toggleLockedForLayer}
+            onDeleteSelection={actions.deleteSelection}
+            onReparentLayer={actions.reparentLayer}
+            onReorderLayer={actions.reorderLayer}
+            renameLayerId={renameLayerId}
+            onRenameHandled={() => setRenameLayerId(null)}
+          />
+        );
+      case "assets":
+        return (
+          <AssetsPanel
+            components={view.components}
+            onInsertComponent={(name) =>
+              actions.createComponentInstance?.(name)
+            }
+          />
+        );
+      case "tokens":
+        return (
+          <TokensPanel
+            tokens={view.tokens}
+            modes={view.tokenModes}
+            onAddMode={actions.addTokenMode}
+            onRenameMode={actions.renameTokenMode}
+            onDeleteMode={actions.deleteTokenMode}
+            onRefreshToken={actions.refreshTokens}
+            onSetToken={(name, value, _axis, _axisValue, selectors) =>
+              actions.setToken?.(
+                name,
+                value,
+                selectors ? encodeTokenCellRef(selectors) : undefined,
+              )
+            }
+            onCreateToken={actions.createToken}
+          />
+        );
+      case "transactions":
+        return (
+          <TransactionHistoryPanel
+            entries={view.editHistory}
+            onRefresh={actions.refreshEditHistory}
+            onRestore={actions.restoreEditHistory}
+          />
+        );
+      case "history":
+        return (
+          <VersionHistoryPanel
+            gitStatus={view.gitStatus}
+            history={view.history}
+            branches={view.branches}
+            isHistoryPreview={view.isHistoryPreview}
+            previewCommit={view.previewCommit}
+            onSaveVersion={actions.saveVersion}
+            onRefreshHistory={actions.refreshHistory}
+            onPreviewVersion={actions.previewVersion}
+            onExitHistoryPreview={actions.exitHistoryPreview}
+            onRestoreVersion={actions.restoreVersion}
+            onCreateBranch={actions.createBranch}
+            onSwitchBranch={actions.switchBranch}
+          />
+        );
+      case "comments":
+        return (
+          <CommentsPanel
+            comments={view.comments}
+            activeCommentThreadId={view.activeCommentThreadId}
+            onSelectCommentThread={actions.selectCommentThread}
+            onCreateCommentThread={actions.createCommentThread}
+            onReplyCommentThread={actions.replyCommentThread}
+            onResolveCommentThread={actions.resolveCommentThread}
+            onUnresolveCommentThread={actions.unresolveCommentThread}
+            onDeleteCommentThread={actions.deleteCommentThread}
+            onDeleteCommentMessage={actions.deleteCommentMessage}
+          />
+        );
+    }
+  };
+
+  const drawerTab = state.drawerTab;
+  const inspectorOpen = Boolean(view.selection && state.inspectorVisible);
+
   return (
     <TooltipProvider delayDuration={200}>
       <div className="shell flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
@@ -267,342 +355,174 @@ function EditorShell({
           })()}
         </header>
 
-        <div className="shell-body flex flex-1 min-h-0 w-full overflow-hidden">
-          <ResizablePanelGroup
-            orientation="horizontal"
-            className="h-full w-full"
+        <div className="shell-body relative flex min-h-0 w-full flex-1 overflow-hidden">
+          <EditorRail drawerTab={drawerTab} onChange={setDrawerTab} />
+
+          <main
+            className={cn(
+              "canvas-stage relative min-w-0 flex-1 overflow-hidden bg-background",
+              activeTool === "hand" ? "cursor-grab" : "cursor-default",
+            )}
+            data-testid="canvas-slot"
+            onDragOver={(e) => {
+              if (
+                e.dataTransfer.types.includes(
+                  "application/ombrique-component",
+                ) ||
+                e.dataTransfer.types.includes("text/plain")
+              ) {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "copy";
+              }
+            }}
+            onDrop={(e) => {
+              const compName =
+                e.dataTransfer.getData("application/ombrique-component") ||
+                e.dataTransfer.getData("text/plain");
+              if (!compName) return;
+              e.preventDefault();
+              const rect = e.currentTarget.getBoundingClientRect();
+              const zoom = view.zoom || 1;
+              const x = Math.round((e.clientX - rect.left) / zoom);
+              const y = Math.round((e.clientY - rect.top) / zoom);
+              actions.createComponentInstance?.(compName, { x, y });
+            }}
           >
-            <ResizablePanel
-              defaultSize={240}
-              minSize={180}
-              maxSize={480}
-              className="shell-left flex flex-col border-r border-border bg-card/30"
-            >
-              <PagesPanel
-                pages={view.pages}
-                activePageId={view.activePageId}
-                onSelectPage={actions.selectPage}
-                onAddPage={actions.addPage}
-                onRenamePage={actions.renamePage}
-                onDeletePage={actions.deletePage}
-              />
-              <div
-                role="tablist"
-                aria-label="左侧面板标签"
-                className="flex items-center gap-0.5 border-t border-b border-border bg-muted/30 px-1.5 py-0.5 select-none"
-                onKeyDown={(e) => {
-                  if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
-                    e.preventDefault();
-                    const tabs: Array<
-                      | "layers"
-                      | "assets"
-                      | "tokens"
-                      | "history"
-                      | "transactions"
-                      | "comments"
-                    > = [
-                      "layers",
-                      "assets",
-                      "tokens",
-                      "history",
-                      "transactions",
-                      "comments",
-                    ];
-                    const curIdx = tabs.indexOf(leftTab);
-                    const delta = e.key === "ArrowRight" ? 1 : -1;
-                    const nextIdx =
-                      (curIdx + delta + tabs.length) % tabs.length;
-                    setLeftTab(tabs[nextIdx] ?? "layers");
+            <div
+              ref={canvasMountRef}
+              id="canvas-mount"
+              className="canvas-mount absolute inset-0"
+            />
+
+            {view.isHistoryPreview && (
+              <div className="absolute top-3 left-1/2 z-30 flex -translate-x-1/2 items-center gap-3 rounded-full border border-[#3a3a3a] bg-[#171717] px-4 py-1.5 text-xs text-[#b4b4b4]">
+                <span className="flex items-center gap-1.5 text-white">
+                  <span className="size-2 rounded-full bg-[#c6f24e]" />
+                  正在预览历史版本: {view.previewCommit?.shortHash} (
+                  {view.previewCommit?.message})
+                </span>
+                <Button
+                  variant="secondary"
+                  size="xs"
+                  className="h-6 rounded-md text-[11px]"
+                  onClick={() =>
+                    view.previewCommit &&
+                    actions.restoreVersion?.(view.previewCommit)
                   }
-                }}
+                >
+                  恢复此版本
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  className="h-6 rounded-md text-[11px]"
+                  onClick={() => actions.exitHistoryPreview?.()}
+                >
+                  退出预览
+                </Button>
+              </div>
+            )}
+
+            <div className="pointer-events-none absolute top-3 left-3 z-10 flex items-center gap-2 rounded-full border border-[#242424] bg-[#141414] px-3 py-1.5 text-xs text-[#b4b4b4]">
+              <SparklesIcon className="size-3.5 text-[#c6f24e]" />
+              <span>
+                {view.pages.find((page) => page.id === view.activePageId)
+                  ?.name ?? "画布"}
+              </span>
+            </div>
+
+            <div className="pointer-events-none absolute inset-0 z-20">
+              {!view.selection && (
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-center text-sm text-[#949494]">
+                  未选中图层
+                </div>
+              )}
+
+              {drawerTab === "pages" ? (
+                <PagesDrawer onClose={() => setDrawerTab(null)}>
+                  <PagesPanel
+                    pages={view.pages}
+                    activePageId={view.activePageId}
+                    onSelectPage={actions.selectPage}
+                    onAddPage={actions.addPage}
+                    onRenamePage={actions.renamePage}
+                    onDeletePage={actions.deletePage}
+                  />
+                </PagesDrawer>
+              ) : drawerTab ? (
+                <LeftDrawer tab={drawerTab} onClose={() => setDrawerTab(null)}>
+                  {renderDrawerContent(drawerTab)}
+                </LeftDrawer>
+              ) : null}
+
+              {inspectorOpen && (
+                <InspectorDrawer onClose={hideInspector}>
+                  <PropertiesPanel
+                    selection={view.selection}
+                    tokens={view.tokens}
+                    tokenModes={view.tokenModes}
+                    pages={view.pages}
+                    activePageId={view.activePageId}
+                    onSetStyle={actions.setStyle}
+                    onSetAttrs={actions.setAttrs}
+                    onSetText={actions.setText}
+                    onSetName={actions.setName}
+                    onToggleHidden={actions.toggleHidden}
+                    onToggleLocked={actions.toggleLocked}
+                    onDetachInstance={actions.detachInstance}
+                    onFlattenSelection={actions.flattenSelection}
+                    onExportNode={actions.exportNode}
+                  />
+                </InspectorDrawer>
+              )}
+
+              <div
+                className="pointer-events-none absolute right-4 bottom-10 z-30"
+                data-ui
               >
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      type="button"
-                      role="tab"
-                      aria-selected={leftTab === "layers"}
-                      variant={leftTab === "layers" ? "secondary" : "ghost"}
-                      size="xs"
-                      onClick={() => setLeftTab("layers")}
-                      className="size-7 shrink-0 p-0"
-                      aria-label="查看图层列表"
-                    >
-                      <LayersIcon className="size-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">图层</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      type="button"
-                      role="tab"
-                      aria-selected={leftTab === "assets"}
-                      variant={leftTab === "assets" ? "secondary" : "ghost"}
-                      size="xs"
-                      onClick={() => setLeftTab("assets")}
-                      className="size-7 shrink-0 p-0"
-                      aria-label="查看组件资产"
-                    >
-                      <ComponentIcon className="size-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">资产</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      type="button"
-                      role="tab"
-                      aria-selected={leftTab === "tokens"}
-                      variant={leftTab === "tokens" ? "secondary" : "ghost"}
-                      size="xs"
-                      onClick={() => setLeftTab("tokens")}
-                      className="size-7 shrink-0 p-0"
-                      aria-label="查看设计变量"
-                    >
-                      <CoinsIcon className="size-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">变量</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      type="button"
-                      role="tab"
-                      aria-selected={leftTab === "history"}
-                      variant={leftTab === "history" ? "secondary" : "ghost"}
-                      size="xs"
-                      onClick={() => setLeftTab("history")}
-                      className="size-7 shrink-0 p-0"
-                      aria-label="查看版本历史"
-                    >
-                      <HistoryIcon className="size-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">历史</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      type="button"
-                      role="tab"
-                      aria-selected={leftTab === "transactions"}
-                      variant={
-                        leftTab === "transactions" ? "secondary" : "ghost"
-                      }
-                      size="xs"
-                      onClick={() => setLeftTab("transactions")}
-                      className="size-7 shrink-0 p-0"
-                      aria-label="查看编辑事务历史"
-                    >
-                      <ClockIcon className="size-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">编辑历史</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      type="button"
-                      role="tab"
-                      aria-selected={leftTab === "comments"}
-                      variant={leftTab === "comments" ? "secondary" : "ghost"}
-                      size="xs"
-                      onClick={() => setLeftTab("comments")}
-                      className="size-7 shrink-0 p-0"
-                      aria-label="查看评论讨论"
-                    >
-                      <MessageSquareIcon className="size-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">评论</TooltipContent>
-                </Tooltip>
+                <div className="pointer-events-auto" data-ui>
+                  <CanvasControls
+                    zoom={view.zoom}
+                    hasSelection={Boolean(view.selection)}
+                    inspectorVisible={state.inspectorVisible}
+                    onZoomOut={() => actions.zoomTo(view.zoom / 1.25)}
+                    onZoomIn={() => actions.zoomTo(view.zoom * 1.25)}
+                    onZoomToFit={actions.zoomToFit}
+                    onToggleInspector={() => {
+                      if (state.inspectorVisible) hideInspector();
+                      else showInspector();
+                    }}
+                  />
+                </div>
               </div>
 
-              {leftTab === "layers" ? (
-                <LayersPanel
-                  layers={view.layers}
-                  selectedLayerId={view.selection?.id ?? null}
-                  onSelectLayer={actions.selectLayer}
-                  onSetName={actions.setName}
-                  onRenameLayer={actions.renameLayer}
-                  onToggleHidden={actions.toggleHidden}
-                  onToggleLocked={actions.toggleLocked}
-                  onToggleHiddenForLayer={actions.toggleHiddenForLayer}
-                  onToggleLockedForLayer={actions.toggleLockedForLayer}
-                  onDeleteSelection={actions.deleteSelection}
-                  onReparentLayer={actions.reparentLayer}
-                  onReorderLayer={actions.reorderLayer}
-                  renameLayerId={renameLayerId}
-                  onRenameHandled={() => setRenameLayerId(null)}
-                />
-              ) : leftTab === "assets" ? (
-                <AssetsPanel
-                  components={view.components}
-                  onInsertComponent={(name) =>
-                    actions.createComponentInstance?.(name)
-                  }
-                />
-              ) : leftTab === "tokens" ? (
-                <TokensPanel
-                  tokens={view.tokens}
-                  modes={view.tokenModes}
-                  onAddMode={actions.addTokenMode}
-                  onRenameMode={actions.renameTokenMode}
-                  onDeleteMode={actions.deleteTokenMode}
-                  onRefreshToken={actions.refreshTokens}
-                  onSetToken={(name, value, _axis, _axisValue, selectors) =>
-                    actions.setToken?.(
-                      name,
-                      value,
-                      selectors ? encodeTokenCellRef(selectors) : undefined,
-                    )
-                  }
-                  onCreateToken={actions.createToken}
-                />
-              ) : leftTab === "transactions" ? (
-                <TransactionHistoryPanel
-                  entries={view.editHistory}
-                  onRefresh={actions.refreshEditHistory}
-                  onRestore={actions.restoreEditHistory}
-                />
-              ) : leftTab === "history" ? (
-                <VersionHistoryPanel
-                  gitStatus={view.gitStatus}
-                  history={view.history}
-                  branches={view.branches}
-                  isHistoryPreview={view.isHistoryPreview}
-                  previewCommit={view.previewCommit}
-                  onSaveVersion={actions.saveVersion}
-                  onRefreshHistory={actions.refreshHistory}
-                  onPreviewVersion={actions.previewVersion}
-                  onExitHistoryPreview={actions.exitHistoryPreview}
-                  onRestoreVersion={actions.restoreVersion}
-                  onCreateBranch={actions.createBranch}
-                  onSwitchBranch={actions.switchBranch}
-                />
-              ) : (
-                <CommentsPanel
-                  comments={view.comments}
-                  activeCommentThreadId={view.activeCommentThreadId}
-                  onSelectCommentThread={actions.selectCommentThread}
-                  onCreateCommentThread={actions.createCommentThread}
-                  onReplyCommentThread={actions.replyCommentThread}
-                  onResolveCommentThread={actions.resolveCommentThread}
-                  onUnresolveCommentThread={actions.unresolveCommentThread}
-                  onDeleteCommentThread={actions.deleteCommentThread}
-                  onDeleteCommentMessage={actions.deleteCommentMessage}
-                />
-              )}
-            </ResizablePanel>
-            <ResizableHandle withHandle className="hover:bg-primary/20" />
-
-            <ResizablePanel
-              minSize={320}
-              className="shell-center relative flex-1 bg-background"
-            >
-              <main
-                className={cn(
-                  "size-full overflow-hidden",
-                  activeTool === "hand" ? "cursor-grab" : "cursor-default",
-                )}
-                data-testid="canvas-slot"
-                onDragOver={(e) => {
-                  if (
-                    e.dataTransfer.types.includes(
-                      "application/ombrique-component",
-                    ) ||
-                    e.dataTransfer.types.includes("text/plain")
-                  ) {
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = "copy";
-                  }
-                }}
-                onDrop={(e) => {
-                  const compName =
-                    e.dataTransfer.getData("application/ombrique-component") ||
-                    e.dataTransfer.getData("text/plain");
-                  if (!compName) return;
-                  e.preventDefault();
-                  const rect = e.currentTarget.getBoundingClientRect();
-                  const zoom = view.zoom || 1;
-                  const x = Math.round((e.clientX - rect.left) / zoom);
-                  const y = Math.round((e.clientY - rect.top) / zoom);
-                  actions.createComponentInstance?.(compName, { x, y });
-                }}
-              >
-                {view.isHistoryPreview && (
-                  <div className="absolute top-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 rounded-full bg-card/95 border border-primary/40 px-4 py-1.5 shadow-lg backdrop-blur text-xs">
-                    <span className="text-primary font-medium flex items-center gap-1.5">
-                      <span className="size-2 rounded-full bg-primary animate-pulse" />
-                      正在预览历史版本: {view.previewCommit?.shortHash} (
-                      {view.previewCommit?.message})
-                    </span>
-                    <Button
-                      variant="default"
-                      size="xs"
-                      className="h-6 text-[11px]"
-                      onClick={() =>
-                        view.previewCommit &&
-                        actions.restoreVersion?.(view.previewCommit)
-                      }
-                    >
-                      恢复此版本
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="xs"
-                      className="h-6 text-[11px]"
-                      onClick={() => actions.exitHistoryPreview?.()}
-                    >
-                      退出预览
-                    </Button>
-                  </div>
-                )}
-                <div
-                  ref={canvasMountRef}
-                  id="canvas-mount"
-                  className="canvas-mount size-full"
-                />
-              </main>
-            </ResizablePanel>
-
-            <ResizableHandle withHandle className="hover:bg-primary/20" />
-
-            <ResizablePanel
-              defaultSize={280}
-              minSize={220}
-              maxSize={480}
-              className="shell-right flex flex-col border-l border-border bg-card/30"
-            >
-              <PropertiesPanel
-                selection={view.selection}
-                tokens={view.tokens}
-                tokenModes={view.tokenModes}
-                pages={view.pages}
-                activePageId={view.activePageId}
-                onSetStyle={actions.setStyle}
-                onSetAttrs={actions.setAttrs}
-                onSetText={actions.setText}
-                onSetName={actions.setName}
-                onToggleHidden={actions.toggleHidden}
-                onToggleLocked={actions.toggleLocked}
-                onDetachInstance={actions.detachInstance}
-                onFlattenSelection={actions.flattenSelection}
-                onExportNode={actions.exportNode}
+              <DiagnosticsBar
+                diagnostics={view.diagnostics}
+                notice={view.notice}
+                onDismissNotice={actions.dismissNotice}
               />
-            </ResizablePanel>
-          </ResizablePanelGroup>
-        </div>
 
-        <DiagnosticsBar
-          diagnostics={view.diagnostics}
-          notice={view.notice}
-          onDismissNotice={actions.dismissNotice}
-        />
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    aria-label="显示属性面板"
+                    onClick={showInspector}
+                    className={cn(
+                      "pointer-events-auto absolute top-3 right-3 z-30 size-8 rounded-full border border-[#303030] bg-[#171717] text-[#b4b4b4] hover:bg-[#242424] hover:text-white",
+                      (!view.selection || state.inspectorVisible) && "hidden",
+                    )}
+                  >
+                    <SlidersHorizontalIcon className="size-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="left">显示属性面板</TooltipContent>
+              </Tooltip>
+            </div>
+          </main>
+        </div>
       </div>
     </TooltipProvider>
   );

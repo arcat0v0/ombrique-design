@@ -61,16 +61,16 @@ export function formatRelativeTime(
   });
 }
 
-function accentFor(seed: string): { hue: number; hue2: number } {
+function accentFor(seed: string): { hue: number } {
   let hash = 0;
   for (let index = 0; index < seed.length; index += 1) {
     hash = (hash * 31 + seed.charCodeAt(index)) % 360;
   }
-  return { hue: hash, hue2: (hash + 62) % 360 };
+  return { hue: hash };
 }
 
 function ProjectCover({ project }: { project: RecentProject }) {
-  const { hue, hue2 } = accentFor(project.root);
+  const { hue } = accentFor(project.root);
   const initials =
     project.name.replace(/\s+/g, "").slice(0, 2).toUpperCase() || "OM";
   if (project.thumbnail) {
@@ -87,7 +87,7 @@ function ProjectCover({ project }: { project: RecentProject }) {
     <div
       className="absolute inset-0 overflow-hidden"
       style={{
-        background: `radial-gradient(120% 120% at 14% 10%, hsl(${hue} 62% 24% / 0.9), transparent 62%), radial-gradient(110% 110% at 88% 94%, hsl(${hue2} 58% 20% / 0.85), transparent 58%), #101014`,
+        backgroundColor: `hsl(${hue} 28% 14%)`,
       }}
     >
       <div className="absolute left-5 top-4 h-2 w-20 rounded-full bg-white/10" />
@@ -133,7 +133,7 @@ function RecentCard({ project, busy, onOpen, onRemove }: RecentCardProps) {
         <ProjectCover project={project} />
         <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-transparent to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
         <div className="absolute inset-x-3 bottom-3 flex items-center justify-between opacity-0 transition-opacity group-hover:opacity-100">
-          <span className="rounded-full bg-black/55 px-2.5 py-1 text-[10px] text-white/85 backdrop-blur">
+          <span className="rounded-full bg-black/55 px-2.5 py-1 text-xs text-white/85 backdrop-blur">
             打开项目
           </span>
           <span className="flex size-6 items-center justify-center rounded-full bg-white/90 text-black">
@@ -143,7 +143,7 @@ function RecentCard({ project, busy, onOpen, onRemove }: RecentCardProps) {
         {!project.exists && (
           <Badge
             variant="destructive"
-            className="absolute left-3 top-3 h-5 gap-1 bg-destructive/25 text-[10px] backdrop-blur"
+            className="absolute left-3 top-3 h-5 gap-1 bg-destructive/25 text-xs backdrop-blur"
           >
             路径不存在
           </Badge>
@@ -155,17 +155,17 @@ function RecentCard({ project, busy, onOpen, onRemove }: RecentCardProps) {
             {project.name}
           </span>
           {typeof project.pageCount === "number" && project.pageCount > 0 && (
-            <span className="ml-auto shrink-0 text-[10px] tabular-nums text-muted-foreground/70">
+            <span className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground/70">
               {project.pageCount} 页
             </span>
           )}
         </div>
-        <div className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+        <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
           <Clock3Icon className="size-3" />
           <span>{formatRelativeTime(project.lastOpenedAt)}</span>
         </div>
         <div
-          className="mt-1.5 truncate font-mono text-[10px] text-muted-foreground/55"
+          className="mt-1.5 truncate font-mono text-xs text-muted-foreground/55"
           title={project.root}
         >
           {project.root}
@@ -217,14 +217,14 @@ function QuickLink({
       disabled={disabled || !action}
       className="group flex items-start gap-3 rounded-xl border border-border/60 bg-card/30 p-3.5 text-left transition-colors hover:border-border hover:bg-card/60 disabled:cursor-default disabled:hover:border-border/60 disabled:hover:bg-card/30"
     >
-      <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg border border-border/60 bg-muted/40 text-muted-foreground transition-colors group-hover:text-foreground">
+      <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center text-muted-foreground transition-colors group-hover:text-foreground">
         <Icon className="size-4" />
       </span>
       <span className="min-w-0">
         <span className="block text-xs font-medium text-foreground">
           {title}
         </span>
-        <span className="mt-0.5 block text-[11px] leading-4 text-muted-foreground">
+        <span className="mt-0.5 block text-xs leading-4 text-muted-foreground">
           {description}
         </span>
       </span>
@@ -288,20 +288,18 @@ export function Workspace({
           )}
         >
           <div className="flex items-center gap-2.5">
-            <span className="flex size-6 items-center justify-center rounded-md bg-primary text-primary-foreground shadow-sm">
-              <BoxIcon className="size-3.5" />
+            <span className="flex size-6 items-center justify-center">
+              <BoxIcon className="size-4 text-foreground" />
             </span>
-            <span className="text-[13px] font-semibold tracking-tight">
+            <span className="text-[14px] font-semibold tracking-tight">
               Ombrique
             </span>
             <span className="h-4 w-px bg-border" />
-            <span className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-              Workspace
-            </span>
+            <span className="text-xs text-muted-foreground">工作区</span>
           </div>
           <div
             className={cn(
-              "flex h-full items-center gap-2 text-[11px] text-muted-foreground",
+              "flex h-full items-center gap-2 text-xs text-muted-foreground",
               windowControls ? "pr-1" : "pr-4",
             )}
           >
@@ -313,7 +311,7 @@ export function Workspace({
 
         <div className="flex min-h-0 flex-1">
           <aside className="hidden w-[232px] shrink-0 flex-col border-r border-border/70 bg-card/20 px-3 py-4 md:flex">
-            <div className="px-2 pb-2 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground/70">
+            <div className="px-2 pb-2 text-xs font-medium text-muted-foreground/70">
               开始
             </div>
             <button
@@ -322,7 +320,7 @@ export function Workspace({
             >
               <Clock3Icon className="size-3.5 text-muted-foreground" />
               <span>最近项目</span>
-              <span className="ml-auto font-mono text-[10px] text-muted-foreground">
+              <span className="ml-auto font-mono text-xs text-muted-foreground">
                 {projects.length}
               </span>
             </button>
@@ -345,12 +343,12 @@ export function Workspace({
               <span>示例项目</span>
             </button>
 
-            <div className="mt-auto rounded-xl border border-border/60 bg-gradient-to-b from-card/80 to-card/30 p-3">
-              <div className="flex items-center gap-1.5 text-[11px] font-medium">
+            <div className="mt-auto rounded-2xl border border-border/60 bg-card/60 p-3">
+              <div className="flex items-center gap-1.5 text-xs font-medium">
                 <SparklesIcon className="size-3.5 text-primary/70" />
                 <span>设计即代码</span>
               </div>
-              <p className="mt-1.5 text-[11px] leading-4 text-muted-foreground">
+              <p className="mt-1.5 text-xs leading-4 text-muted-foreground">
                 每个画板都是项目里的真实 TSX 文件，走 Git、可审查、能交给
                 agent。
               </p>
@@ -358,12 +356,12 @@ export function Workspace({
                 {["V", "F", "R", "T"].map((key) => (
                   <Kbd
                     key={key}
-                    className="h-5 min-w-5 justify-center bg-muted/50 px-1 text-[10px]"
+                    className="h-5 min-w-5 justify-center bg-muted/50 px-1 text-xs"
                   >
                     {key}
                   </Kbd>
                 ))}
-                <span className="ml-1 text-[10px] text-muted-foreground/70">
+                <span className="ml-1 text-xs text-muted-foreground/70">
                   画布工具
                 </span>
               </div>
@@ -388,20 +386,8 @@ export function Workspace({
                 </div>
               )}
 
-              <section className="relative overflow-hidden rounded-2xl border border-border/70 bg-card/40 px-7 py-7 shadow-[0_24px_70px_-50px_rgba(0,0,0,0.9)] lg:px-9 lg:py-8">
-                <div
-                  aria-hidden
-                  className="pointer-events-none absolute -right-28 -top-36 size-[440px] rounded-full bg-[radial-gradient(circle_at_center,rgba(255,51,102,0.18),transparent_66%)]"
-                />
-                <div
-                  aria-hidden
-                  className="pointer-events-none absolute -bottom-40 -left-24 size-[380px] rounded-full bg-[radial-gradient(circle_at_center,rgba(96,125,255,0.16),transparent_66%)]"
-                />
+              <section className="relative overflow-hidden rounded-2xl border border-border/70 bg-card/40 px-7 py-7 lg:px-9 lg:py-8">
                 <div className="relative max-w-[620px]">
-                  <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.2em] text-primary/70">
-                    <span className="size-1.5 rounded-full bg-primary/70" />
-                    Workspace
-                  </div>
                   <h1 className="mt-2.5 text-[28px] font-semibold leading-tight tracking-tight">
                     继续你的设计
                   </h1>
@@ -461,16 +447,16 @@ export function Workspace({
                 <div className="flex flex-wrap items-end justify-between gap-3">
                   <div>
                     <div className="flex items-center gap-2">
-                      <h2 className="text-[15px] font-semibold tracking-tight">
+                      <h2 className="text-[16px] font-semibold tracking-tight">
                         最近打开
                       </h2>
                       {!loading && (
-                        <span className="rounded-full border border-border/60 px-1.5 py-px font-mono text-[10px] text-muted-foreground">
+                        <span className="rounded-full border border-border/60 px-1.5 py-px font-mono text-xs text-muted-foreground">
                           {projects.length}
                         </span>
                       )}
                     </div>
-                    <p className="mt-1 text-[11px] text-muted-foreground">
+                    <p className="mt-1 text-xs text-muted-foreground">
                       本地记录，只保存在这台设备上。
                     </p>
                   </div>
@@ -515,13 +501,13 @@ export function Workspace({
                   </div>
                 ) : (
                   <div className="mt-4 rounded-2xl border border-dashed border-border/70 bg-card/20 px-6 py-12 text-center">
-                    <div className="mx-auto flex size-11 items-center justify-center rounded-xl border border-border/60 bg-card/60 text-muted-foreground">
+                    <div className="mx-auto flex size-11 items-center justify-center text-muted-foreground">
                       <FolderOpenIcon className="size-5" />
                     </div>
                     <h3 className="mt-3 text-sm font-medium">
                       {query ? "没有匹配的项目" : "还没有最近项目"}
                     </h3>
-                    <p className="mx-auto mt-1 max-w-sm text-[11px] leading-5 text-muted-foreground">
+                    <p className="mx-auto mt-1 max-w-sm text-xs leading-5 text-muted-foreground">
                       {query
                         ? `没有找到包含“${query}”的项目，换个关键词试试。`
                         : "打开一个已有的 Ombrique 项目，或者从一个空文件夹开始创建。"}
@@ -568,12 +554,12 @@ export function Workspace({
                   disabled={busy}
                 />
                 <div className="flex items-start gap-3 rounded-xl border border-border/60 bg-card/30 p-3.5">
-                  <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg border border-border/60 bg-muted/40 text-muted-foreground">
+                  <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center text-muted-foreground">
                     <BoxIcon className="size-4" />
                   </span>
                   <div className="min-w-0">
                     <div className="text-xs font-medium">工作区快捷键</div>
-                    <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
                       <Kbd className="bg-muted/50">Ctrl</Kbd>
                       <span>+</span>
                       <Kbd className="bg-muted/50">O</Kbd>

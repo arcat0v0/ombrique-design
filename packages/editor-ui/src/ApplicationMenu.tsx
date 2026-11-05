@@ -136,7 +136,7 @@ export function ApplicationMenu({
                 <FolderIcon />
                 <span className="flex min-w-0 flex-col">
                   <span className="truncate">{project.name}</span>
-                  <span className="truncate text-[10px] text-muted-foreground">
+                  <span className="truncate text-[11px] text-muted-foreground">
                     {project.exists ? project.root : "路径不存在"}
                   </span>
                 </span>

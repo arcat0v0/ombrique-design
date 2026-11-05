@@ -44,6 +44,18 @@ function makeOverlay(): HTMLElement {
 }
 
 describe("renderRulersOverlay", () => {
+  it("hides the ruler layer when visibility is off", () => {
+    const parent = document.createElement("div");
+    const overlay = makeOverlay();
+    parent.appendChild(overlay);
+    document.body.appendChild(parent);
+    renderRulersOverlay(overlay, { x: 10, y: 20, z: 1 }, null, false);
+
+    const rulers = parent.querySelector("#rulers") as HTMLElement | null;
+    expect(rulers?.style.display).toBe("none");
+    expect(context.fillRect).not.toHaveBeenCalled();
+  });
+
   it("reuses ruler canvases while the camera is unchanged", () => {
     const parent = document.createElement("div");
     const overlay = makeOverlay();
@@ -55,7 +67,9 @@ describe("renderRulersOverlay", () => {
     const rulers = document.getElementById("rulers");
     expect(rulers).toBeDefined();
     const topCanvas = document.getElementById("ruler-top") as HTMLCanvasElement;
-    const leftCanvas = document.getElementById("ruler-left") as HTMLCanvasElement;
+    const leftCanvas = document.getElementById(
+      "ruler-left",
+    ) as HTMLCanvasElement;
     expect(topCanvas).toBeDefined();
     expect(leftCanvas).toBeDefined();
     expect(context.fillRect).toHaveBeenCalledTimes(2);
