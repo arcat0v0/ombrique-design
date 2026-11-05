@@ -1,5 +1,12 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import {
+  ClockIcon,
   CoinsIcon,
   ComponentIcon,
   HistoryIcon,
@@ -24,8 +31,9 @@ import { LayersPanel } from "./LayersPanel";
 import { AssetsPanel } from "./AssetsPanel";
 import { PagesPanel } from "./PagesPanel";
 import { PropertiesPanel } from "./PropertiesPanel";
-import { TokensPanel } from "./TokensPanel";
+import { TokensPanel, encodeTokenCellRef } from "./TokensPanel";
 import { VersionHistoryPanel } from "./VersionHistoryPanel";
+import { TransactionHistoryPanel } from "./TransactionHistoryPanel";
 import { CommentsPanel } from "./CommentsPanel";
 import { Toolbar } from "./Toolbar";
 import { WindowControls } from "./WindowControls";
@@ -95,7 +103,7 @@ function EditorShell({
 }: ShellProps & { windowControls?: ReactNode }) {
   const canvasMountRef = useRef<HTMLDivElement>(null);
   const [leftTab, setLeftTab] = useState<
-    "layers" | "assets" | "tokens" | "history" | "comments"
+    "layers" | "assets" | "tokens" | "history" | "transactions" | "comments"
   >("layers");
   const [renameLayerId, setRenameLayerId] = useState<string | null>(null);
   const activeTool = view.activeTool ?? "select";
@@ -286,8 +294,20 @@ function EditorShell({
                   if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
                     e.preventDefault();
                     const tabs: Array<
-                      "layers" | "assets" | "tokens" | "history" | "comments"
-                    > = ["layers", "assets", "tokens", "history", "comments"];
+                      | "layers"
+                      | "assets"
+                      | "tokens"
+                      | "history"
+                      | "transactions"
+                      | "comments"
+                    > = [
+                      "layers",
+                      "assets",
+                      "tokens",
+                      "history",
+                      "transactions",
+                      "comments",
+                    ];
                     const curIdx = tabs.indexOf(leftTab);
                     const delta = e.key === "ArrowRight" ? 1 : -1;
                     const nextIdx =
@@ -369,6 +389,25 @@ function EditorShell({
                     <Button
                       type="button"
                       role="tab"
+                      aria-selected={leftTab === "transactions"}
+                      variant={
+                        leftTab === "transactions" ? "secondary" : "ghost"
+                      }
+                      size="xs"
+                      onClick={() => setLeftTab("transactions")}
+                      className="size-7 shrink-0 p-0"
+                      aria-label="查看编辑事务历史"
+                    >
+                      <ClockIcon className="size-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">编辑历史</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      role="tab"
                       aria-selected={leftTab === "comments"}
                       variant={leftTab === "comments" ? "secondary" : "ghost"}
                       size="xs"
@@ -415,8 +454,20 @@ function EditorShell({
                   onRenameMode={actions.renameTokenMode}
                   onDeleteMode={actions.deleteTokenMode}
                   onRefreshToken={actions.refreshTokens}
-                  onSetToken={actions.setToken}
+                  onSetToken={(name, value, _axis, _axisValue, selectors) =>
+                    actions.setToken?.(
+                      name,
+                      value,
+                      selectors ? encodeTokenCellRef(selectors) : undefined,
+                    )
+                  }
                   onCreateToken={actions.createToken}
+                />
+              ) : leftTab === "transactions" ? (
+                <TransactionHistoryPanel
+                  entries={view.editHistory}
+                  onRefresh={actions.refreshEditHistory}
+                  onRestore={actions.restoreEditHistory}
                 />
               ) : leftTab === "history" ? (
                 <VersionHistoryPanel

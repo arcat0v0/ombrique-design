@@ -9,7 +9,7 @@ import type {
   StyleRow,
   ZOrderAction,
 } from "@ombrique/editor-ui";
-import { isCanvasShortcut } from "@ombrique/editor-ui";
+import { buildRollbackFiles, isCanvasShortcut } from "@ombrique/editor-ui";
 import type {
   CommentAnchor,
   CommentThread,
@@ -20,6 +20,7 @@ import type {
   GitBranchList,
   GitCommit,
   GitStatus,
+  HistorySnapshotEntry,
   Manifest,
   RecentProject,
   TokenItem,
@@ -124,6 +125,7 @@ export interface ShellBridge {
   resolveNode: (file: string, path: number[]) => Promise<ResolvedNode | null>;
   tree: (file: string) => Promise<LayerNode[]>;
   versions: () => Promise<Record<string, string>>;
+  history?: () => Promise<HistorySnapshotEntry[]>;
   openExample: () => Promise<string | null>;
   createProject?: () => Promise<{
     ok: boolean;
@@ -332,6 +334,7 @@ const INITIAL: ShellViewWithTokens = {
   showHotspots: false,
   gitStatus: null,
   history: [],
+  editHistory: [],
   branches: null,
   isHistoryPreview: false,
   previewCommit: null,
@@ -428,6 +431,9 @@ export function createShellState() {
   let selected: ResolvedNode | null = null;
   let clipboard: ResolvedNode[] = [];
   let multiSelectionPaths: Array<{ file: string; path: number[] }> = [];
+  let editHistoryGeneration = 0;
+  let editHistoryRefreshRunning = false;
+  let editHistoryRefreshQueued = false;
   const listeners = new Set<(next: ShellViewWithTokens) => void>();
 
   function set(patch: Partial<ShellViewWithTokens>) {
@@ -497,6 +503,28 @@ export function createShellState() {
       });
     } catch {
       // non-blocking
+    }
+  }
+
+  async function refreshEditHistory() {
+    if (!bridge?.history) return;
+    editHistoryRefreshQueued = true;
+    if (editHistoryRefreshRunning) return;
+    editHistoryRefreshRunning = true;
+    try {
+      while (editHistoryRefreshQueued) {
+        editHistoryRefreshQueued = false;
+        const generation = editHistoryGeneration;
+        try {
+          const entries = await bridge.history();
+          if (generation === editHistoryGeneration)
+            set({ editHistory: entries });
+        } catch {
+          if (generation === editHistoryGeneration) set({ editHistory: [] });
+        }
+      }
+    } finally {
+      editHistoryRefreshRunning = false;
     }
   }
 
@@ -646,9 +674,7 @@ export function createShellState() {
   async function deleteShortcutTargets(explicit?: ShortcutNodeRef[]) {
     const targets = await resolveShortcutTargets(explicit);
     if (targets.length === 0) return;
-    await sendCommands([
-      { kind: "deleteNodes", targets: targets.map(toRef) },
-    ]);
+    await sendCommands([{ kind: "deleteNodes", targets: targets.map(toRef) }]);
     selected = null;
     set({ selection: null });
   }
@@ -699,8 +725,7 @@ export function createShellState() {
       parent = toRef(parentNode);
     }
     const minIndex = targets.reduce(
-      (min, node) =>
-        Math.min(min, node.path[node.path.length - 1] ?? 0),
+      (min, node) => Math.min(min, node.path[node.path.length - 1] ?? 0),
       Number.POSITIVE_INFINITY,
     );
     await sendCommands([
@@ -789,7 +814,10 @@ export function createShellState() {
       node.path.length > 1 ? node.path.slice(0, -1).join("/") : null;
     let parent: NodeRefInfo | null = null;
     if (parentId) {
-      const parentNode = await bridge.resolveNode(primary.file, parentId.split("/").map(Number));
+      const parentNode = await bridge.resolveNode(
+        primary.file,
+        parentId.split("/").map(Number),
+      );
       if (!parentNode) return;
       parent = toRef(parentNode);
     }
@@ -958,6 +986,7 @@ export function createShellState() {
     showWorkspace: () => {
       selected = null;
       multiSelectionPaths = [];
+      editHistoryGeneration += 1;
       set({
         projectRoot: null,
         manifest: null,
@@ -975,6 +1004,7 @@ export function createShellState() {
         stats: null,
         gitStatus: null,
         history: [],
+        editHistory: [],
         branches: null,
         isHistoryPreview: false,
         previewCommit: null,
@@ -1828,6 +1858,20 @@ export function createShellState() {
       await bridge.gitRestoreVersion(commit.hash);
       set({ isHistoryPreview: false, previewCommit: null });
     },
+    refreshEditHistory,
+    restoreEditHistory: async (id: string) => {
+      const entry = view.editHistory?.find((candidate) => candidate.id === id);
+      if (!entry || !bridge?.send) return false;
+      try {
+        await bridge.send({
+          kind: "restoreVersion",
+          files: buildRollbackFiles(files, entry.before),
+        });
+        return true;
+      } catch {
+        return false;
+      }
+    },
     createBranch: async (branchName: string) => {
       if (!bridge?.gitCreateBranch) return false;
       try {
@@ -1979,6 +2023,7 @@ export function createShellState() {
   };
 
   function applyProject(message: ProjectMessage) {
+    editHistoryGeneration += 1;
     files = message.files;
     const pages = message.manifest.pages.map((page) => ({
       id: page.id,
@@ -1998,9 +2043,11 @@ export function createShellState() {
       selection: null,
       layers: [],
       components: message.components ?? [],
+      editHistory: [],
     });
     if (activePageId) void refreshLayers(activePageId);
     void refreshTokens();
+    void refreshEditHistory();
     if (bridge?.loadComments) {
       void bridge
         .loadComments()
@@ -2040,15 +2087,18 @@ export function createShellState() {
       }
       if (view.activePageId) void refreshLayers(view.activePageId);
       if (selected) void selectNode(selected.ref.file, selected.path);
+      void refreshEditHistory();
     });
     bridge.onDoc((message) => {
       if (message.kind === "diagnostics" && message.items)
         set({ diagnostics: message.items });
-      if (message.kind === "historyChanged")
+      if (message.kind === "historyChanged") {
         set({
           canUndo: Boolean(message.canUndo),
           canRedo: Boolean(message.canRedo),
         });
+        void refreshEditHistory();
+      }
       if (message.kind === "manifestChanged" && message.manifest) {
         const manifest = message.manifest;
         const pages = manifest.pages.map((page) => ({
@@ -2064,7 +2114,10 @@ export function createShellState() {
       }
       if (message.kind === "commandFailed" && message.message)
         set({ notice: message.message, busy: false });
-      if (message.kind === "transactionApplied") set({ busy: false });
+      if (message.kind === "transactionApplied") {
+        set({ busy: false });
+        void refreshEditHistory();
+      }
     });
     bridge.onFatal((message) => set({ notice: `文档服务错误：${message}` }));
     bridge.onStats((stats) => set({ stats }));

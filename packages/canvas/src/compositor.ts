@@ -3,6 +3,7 @@ import type { Camera } from "./camera";
 import { UploadQueue } from "./uploadQueue";
 import { resolveElementImageUpload } from "./element-upload";
 import { fitTextureSize } from "./texture-size";
+import { shaderTextureSize, type ShaderInit } from "./shader-layer";
 
 export interface BoardInit {
   el: Element;
@@ -27,6 +28,7 @@ export interface CompositorOptions {
   minZoom?: number;
   maxZoom?: number;
   clearColor?: { r: number; g: number; b: number; a: number };
+  frameWaitTimeoutMs?: number;
 }
 
 export interface CameraHandle {
@@ -45,6 +47,8 @@ export interface Compositor {
   readonly canvas: HTMLCanvasElement;
   readonly camera: CameraHandle;
   setBoards(boards: BoardInit[]): void;
+  setShaders(shaders: ShaderInit[]): void;
+  flushUploads(): void;
   uploadAtScale(el: Element, scale: number): boolean;
   setInteractive(active: boolean): void;
   suspendBoard(el: Element): void;
@@ -105,6 +109,65 @@ fn fs(in: VSOut) -> @location(0) vec4f {
 }
 `;
 
+const SHADER_WGSL = `
+struct Cam {
+  z: f32,
+  x: f32,
+  y: f32,
+  dpr: f32,
+  vw: f32,
+  vh: f32,
+}
+struct Quad {
+  pos: vec2f,
+  size: vec2f,
+  radius: f32,
+  pad0: f32,
+  pad1: f32,
+}
+@group(0) @binding(0) var samp: sampler;
+@group(0) @binding(1) var tex: texture_2d<f32>;
+@group(0) @binding(2) var<uniform> quad: Quad;
+@group(0) @binding(3) var<uniform> cam: Cam;
+
+struct VSOut {
+  @builtin(position) pos: vec4f,
+  @location(0) uv: vec2f,
+}
+
+@vertex
+fn vs(@builtin(vertex_index) vi: u32) -> VSOut {
+  var corners = array<vec2f, 6>(
+    vec2f(0.0, 0.0),
+    vec2f(1.0, 0.0),
+    vec2f(0.0, 1.0),
+    vec2f(0.0, 1.0),
+    vec2f(1.0, 0.0),
+    vec2f(1.0, 1.0),
+  );
+  let corner = corners[vi];
+  let world = quad.pos + corner * quad.size;
+  let screen = (world - vec2f(cam.x, cam.y)) * cam.z * cam.dpr;
+  var out: VSOut;
+  out.pos = vec4f(screen.x / cam.vw * 2.0 - 1.0, 1.0 - screen.y / cam.vh * 2.0, 0.0, 1.0);
+  out.uv = corner;
+  return out;
+}
+
+@fragment
+fn fs(in: VSOut) -> @location(0) vec4f {
+  let halfSize = quad.size * 0.5;
+  let local = in.uv * quad.size - halfSize;
+  let radius = clamp(quad.radius, 0.0, min(halfSize.x, halfSize.y));
+  let q = abs(local) - (halfSize - vec2f(radius));
+  let edgeDistance = length(max(q, vec2f(0.0))) + min(max(q.x, q.y), 0.0) - radius;
+  if (edgeDistance > 0.0) {
+    discard;
+  }
+  return textureSample(tex, samp, in.uv);
+}
+`;
+
 interface HiResEntry {
   tex: GPUTexture;
   texW: number;
@@ -140,14 +203,94 @@ interface Board {
   suspended: boolean;
 }
 
-function nextFrame(): Promise<void> {
-  const { promise, resolve } = Promise.withResolvers<void>();
-  requestAnimationFrame(() => resolve());
+interface ShaderLayer {
+  el: Element;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  rect: { x: number; y: number; w: number; h: number };
+  radius: number;
+  ubo: GPUBuffer;
+  tex: GPUTexture;
+  texW: number;
+  texH: number;
+  bind: GPUBindGroup;
+}
+
+interface FramePump {
+  stalled: boolean;
+  warned: boolean;
+}
+
+function nextFrame(pump: FramePump, timeoutMs: number): Promise<boolean> {
+  if (pump.stalled) return Promise.resolve(false);
+  const { promise, resolve } = Promise.withResolvers<boolean>();
+  let settled = false;
+  const timer = setTimeout(() => {
+    if (settled) return;
+    settled = true;
+    pump.stalled = true;
+    if (!pump.warned) {
+      pump.warned = true;
+      console.warn(
+        `[webgpu] requestAnimationFrame did not fire within ${timeoutMs}ms; continuing initialization without frame pacing`,
+      );
+    }
+    resolve(false);
+  }, timeoutMs);
+  requestAnimationFrame(() => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    resolve(true);
+  });
   return promise;
 }
 
-async function waitFrames(n: number): Promise<void> {
-  for (let k = 0; k < n; k += 1) await nextFrame();
+async function waitFrames(
+  n: number,
+  pump: FramePump,
+  timeoutMs: number,
+): Promise<boolean> {
+  let rendered = true;
+  for (let k = 0; k < n; k += 1) {
+    if (!(await nextFrame(pump, timeoutMs))) rendered = false;
+  }
+  return rendered;
+}
+
+function delay(ms: number): Promise<void> {
+  const { promise, resolve } = Promise.withResolvers<void>();
+  setTimeout(resolve, ms);
+  return promise;
+}
+
+async function waitForQueueCompletion(
+  queue: GPUQueue,
+  timeoutMs: number,
+): Promise<boolean> {
+  const submitted = queue.onSubmittedWorkDone;
+  if (typeof submitted !== "function") {
+    await delay(0);
+    return true;
+  }
+  const { promise: timedOut, resolve: expire } =
+    Promise.withResolvers<boolean>();
+  const timer = setTimeout(() => expire(false), timeoutMs);
+  try {
+    const completed = await Promise.race([
+      submitted.call(queue).then(
+        () => true,
+        () => false,
+      ),
+      timedOut,
+    ]);
+    await delay(0);
+    return completed;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function createCompositor(
@@ -187,6 +330,8 @@ export async function createCompositor(
   let cssW = canvas.clientWidth || 1;
   let cssH = canvas.clientHeight || 1;
   let dpr = globalThis.devicePixelRatio || 1;
+  const frameWaitTimeoutMs = Math.max(1, opts.frameWaitTimeoutMs ?? 1000);
+  const framePump: FramePump = { stalled: false, warned: false };
 
   const uploadFormat = await detectUploadFormat();
 
@@ -201,6 +346,33 @@ export async function createCompositor(
     fragment: { module, entryPoint: "fs", targets: [{ format: canvasFormat }] },
     primitive: { topology: "triangle-list" },
   });
+  const shaderModule = device.createShaderModule({ code: SHADER_WGSL });
+  const shaderPipeline = device.createRenderPipeline({
+    layout: "auto",
+    vertex: { module: shaderModule, entryPoint: "vs" },
+    fragment: {
+      module: shaderModule,
+      entryPoint: "fs",
+      targets: [
+        {
+          format: canvasFormat,
+          blend: {
+            color: {
+              srcFactor: "one",
+              dstFactor: "one-minus-src-alpha",
+              operation: "add",
+            },
+            alpha: {
+              srcFactor: "one",
+              dstFactor: "one-minus-src-alpha",
+              operation: "add",
+            },
+          },
+        },
+      ],
+    },
+    primitive: { topology: "triangle-list" },
+  });
   const camUbo = device.createBuffer({
     size: 32,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
@@ -210,6 +382,9 @@ export async function createCompositor(
   const queue = new UploadQueue();
   let boards: Board[] = [];
   let byEl = new Map<Element, Board>();
+  let shaders: ShaderLayer[] = [];
+  let shaderByEl = new Map<Element, ShaderLayer>();
+  let shaderDpr = dpr;
   let cam: Camera = { x: 0, y: 0, z: 1 };
   let destroyed = false;
   let frameNo = 0;
@@ -240,7 +415,8 @@ export async function createCompositor(
     probe.appendChild(inner);
     document.body.appendChild(probe);
     probe.getContext("2d");
-    await waitFrames(3);
+    await waitFrames(3, framePump, frameWaitTimeoutMs);
+    const failures: string[] = [];
     for (const format of ["rgba8unorm", "bgra8unorm"] as const) {
       gpuErrors.length = 0;
       const tex = device.createTexture({
@@ -257,16 +433,26 @@ export async function createCompositor(
         { texture: tex, size: { width: 8, height: 8 } },
       );
       device.queue.submit([]);
-      await waitFrames(2);
+      await waitFrames(2, framePump, frameWaitTimeoutMs);
+      const completed = await waitForQueueCompletion(
+        device.queue,
+        frameWaitTimeoutMs,
+      );
       tex.destroy();
       if (gpuErrors.length === 0) {
         probe.remove();
+        if (!completed) {
+          console.warn(
+            `[webgpu] GPU queue did not complete the upload-format probe within ${frameWaitTimeoutMs}ms; continuing`,
+          );
+        }
         return format;
       }
+      failures.push(`${format}: ${gpuErrors.join("; ")}`);
     }
     probe.remove();
     throw new Error(
-      `drawElementImageToTexture failed on all formats: ${gpuErrors.join("; ")}`,
+      `drawElementImageToTexture failed on all formats${framePump.stalled ? " (animation frames stalled during probe)" : ""}: ${failures.join(" | ")}`,
     );
   }
 
@@ -300,6 +486,121 @@ export async function createCompositor(
         GPUTextureUsage.COPY_SRC |
         GPUTextureUsage.RENDER_ATTACHMENT,
     });
+  }
+
+  function createShaderTexture(width: number, height: number): GPUTexture {
+    return device.createTexture({
+      size: [width, height],
+      format: uploadFormat,
+      usage:
+        GPUTextureUsage.TEXTURE_BINDING |
+        GPUTextureUsage.COPY_DST |
+        GPUTextureUsage.RENDER_ATTACHMENT,
+    });
+  }
+
+  function shaderBindFor(
+    layer: ShaderLayer,
+    texture: GPUTexture,
+  ): GPUBindGroup {
+    return device.createBindGroup({
+      layout: shaderPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: sampler },
+        { binding: 1, resource: texture.createView() },
+        { binding: 2, resource: { buffer: layer.ubo } },
+        { binding: 3, resource: { buffer: camUbo } },
+      ],
+    });
+  }
+
+  function uploadShader(layer: ShaderLayer): void {
+    if (layer.el.parentElement !== canvas) return;
+    try {
+      uploadElementImage(
+        { source: layer.el },
+        { texture: layer.tex, size: { width: layer.texW, height: layer.texH } },
+      );
+    } catch {
+      return;
+    }
+    uploadsTotal += 1;
+  }
+
+  function disposeShaderResources(): void {
+    for (const layer of shaders) {
+      layer.tex.destroy();
+      layer.ubo.destroy();
+    }
+    shaders = [];
+    shaderByEl = new Map();
+  }
+
+  function setShaders(inits: ShaderInit[]): void {
+    if (destroyed) return;
+    disposeShaderResources();
+    const maxDim = device.limits.maxTextureDimension2D;
+    for (const init of inits) {
+      const size = shaderTextureSize(init.worldW, init.worldH, dpr, maxDim);
+      const tex = createShaderTexture(size.width, size.height);
+      const ubo = device.createBuffer({
+        size: 32,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+      });
+      device.queue.writeBuffer(
+        ubo,
+        0,
+        new Float32Array([
+          init.worldX,
+          init.worldY,
+          init.worldW,
+          init.worldH,
+          Math.max(0, init.radius ?? 0),
+          0,
+          0,
+          0,
+        ]),
+      );
+      const layer: ShaderLayer = {
+        el: init.el,
+        x: init.worldX,
+        y: init.worldY,
+        w: init.worldW,
+        h: init.worldH,
+        rect: {
+          x: init.worldX,
+          y: init.worldY,
+          w: init.worldW,
+          h: init.worldH,
+        },
+        radius: Math.max(0, init.radius ?? 0),
+        ubo,
+        tex,
+        texW: size.width,
+        texH: size.height,
+        bind: null as unknown as GPUBindGroup,
+      };
+      layer.bind = shaderBindFor(layer, tex);
+      shaders.push(layer);
+      shaderByEl.set(init.el, layer);
+      uploadShader(layer);
+    }
+    shaderDpr = dpr;
+    canvas.requestPaint();
+  }
+
+  function resizeShaderTextures(): void {
+    const maxDim = device.limits.maxTextureDimension2D;
+    for (const layer of shaders) {
+      const size = shaderTextureSize(layer.w, layer.h, dpr, maxDim);
+      if (size.width === layer.texW && size.height === layer.texH) continue;
+      layer.tex.destroy();
+      layer.tex = createShaderTexture(size.width, size.height);
+      layer.texW = size.width;
+      layer.texH = size.height;
+      layer.bind = shaderBindFor(layer, layer.tex);
+      uploadShader(layer);
+    }
   }
 
   function restoreBase(b: Board): void {
@@ -634,18 +935,35 @@ export async function createCompositor(
 
   function uploadEl(el: Element): void {
     const b = byEl.get(el);
-    if (!b || b.suspended || el.parentElement !== canvas) return;
-    try {
-      uploadElementImage(
-        { source: el },
-        { texture: b.tex, size: { width: b.texW, height: b.texH } },
-      );
-    } catch {
+    if (b) {
+      if (b.suspended || el.parentElement !== canvas) return;
+      try {
+        uploadElementImage(
+          { source: el },
+          { texture: b.tex, size: { width: b.texW, height: b.texH } },
+        );
+      } catch {
+        return;
+      }
+      if (b.tex === b.baseTex) b.baseReady = true;
+      uploadsTotal += 1;
+      opts.onBoardUploaded?.(el);
       return;
     }
-    if (b.tex === b.baseTex) b.baseReady = true;
-    uploadsTotal += 1;
-    opts.onBoardUploaded?.(el);
+    const layer = shaderByEl.get(el);
+    if (layer) uploadShader(layer);
+  }
+
+  function flushUploads(): void {
+    if (queue.size === 0) return;
+    const t0 = performance.now();
+    const els = queue.takeAll();
+    for (const el of els) uploadEl(el);
+    if (!queue.isInitialDone) {
+      const ms = performance.now() - t0;
+      queue.completeInitial(ms);
+      opts.onInitialUpload?.(ms, els.length);
+    }
   }
 
   function onPaint(e: Event): void {
@@ -695,16 +1013,12 @@ export async function createCompositor(
       applyPendingScale(b);
     }
 
-    if (queue.size > 0) {
-      const t0 = performance.now();
-      const els = queue.takeAll();
-      for (const el of els) uploadEl(el);
-      if (!queue.isInitialDone) {
-        const ms = performance.now() - t0;
-        queue.completeInitial(ms);
-        opts.onInitialUpload?.(ms, els.length);
-      }
+    if (shaderDpr !== dpr) {
+      shaderDpr = dpr;
+      resizeShaderTextures();
     }
+
+    flushUploads();
 
     verifyPendingUploads();
 
@@ -738,6 +1052,13 @@ export async function createCompositor(
       pass.draw(6);
       visible += 1;
     }
+    pass.setPipeline(shaderPipeline);
+    for (const layer of shaders) {
+      if (!intersects(layer.rect, view)) continue;
+      pass.setBindGroup(0, layer.bind);
+      pass.draw(6);
+      visible += 1;
+    }
     pass.end();
     device.queue.submit([encoder.finish()]);
 
@@ -761,6 +1082,24 @@ export async function createCompositor(
           mtx.f = sy;
           canvas.updateElementGeometry(b.el, { canvasTransform: mtx });
         }
+        try {
+          for (const layer of shaders) {
+            const sx = (layer.x - cam.x) * cam.z;
+            const sy = (layer.y - cam.y) * cam.z;
+            if (
+              sx >= cssW ||
+              sy >= cssH ||
+              sx + layer.w * cam.z <= 0 ||
+              sy + layer.h * cam.z <= 0
+            )
+              continue;
+            mtx.a = cam.z;
+            mtx.d = cam.z;
+            mtx.e = sx;
+            mtx.f = sy;
+            canvas.updateElementGeometry(layer.el, { canvasTransform: mtx });
+          }
+        } catch {}
         geometryApiOk = true;
       } catch {
         geometryApiOk = false;
@@ -831,7 +1170,13 @@ export async function createCompositor(
   ): Promise<{ width: number; height: number; rgba: Uint8Array } | null> {
     const b = byEl.get(el);
     if (!b || destroyed) return null;
+    flushUploads();
     uploadEl(el);
+    const boardRect = { x: b.x, y: b.y, w: b.w, h: b.h };
+    const overlapping = shaders.filter((layer) =>
+      intersects(layer.rect, boardRect),
+    );
+    for (const layer of overlapping) uploadShader(layer);
     const maxDim = device.limits.maxTextureDimension2D;
     const outW = Math.min(Math.max(1, Math.round(b.w * scale)), maxDim);
     const outH = Math.min(Math.max(1, Math.round(b.h * scale)), maxDim);
@@ -862,6 +1207,11 @@ export async function createCompositor(
     pass.setPipeline(pipeline);
     pass.setBindGroup(0, b.baseBind);
     pass.draw(6);
+    pass.setPipeline(shaderPipeline);
+    for (const layer of overlapping) {
+      pass.setBindGroup(0, layer.bind);
+      pass.draw(6);
+    }
     pass.end();
     const bytesPerRow = Math.ceil((outW * 4) / 256) * 256;
     const buffer = device.createBuffer({
@@ -929,6 +1279,7 @@ export async function createCompositor(
     observer.disconnect();
     canvas.removeEventListener("paint", onPaint);
     disposeBoardResources();
+    disposeShaderResources();
     camUbo.destroy();
     device.destroy();
   }
@@ -937,6 +1288,8 @@ export async function createCompositor(
     canvas,
     camera,
     setBoards,
+    setShaders,
+    flushUploads,
     uploadAtScale,
     setInteractive,
     suspendBoard,

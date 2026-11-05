@@ -74,7 +74,6 @@ export interface FrameProps extends HTMLAttributes<HTMLElement> {
   cursor?: "pointer" | "default";
   transitionType?: PrototypeTransitionType;
   transitionDuration?: number;
-  mode?: string;
 }
 
 export function Frame({
@@ -103,7 +102,6 @@ export function Frame({
   cursor,
   transitionType,
   transitionDuration,
-  mode,
   children,
   ...rest
 }: FrameProps) {
@@ -167,7 +165,6 @@ export function Frame({
         transitionDuration !== undefined ? transitionDuration : undefined
       }
       data-prototype-hover={protoHover || undefined}
-      data-mode={mode || undefined}
       className={joinClass(className)}
       style={{ ...base, ...style }}
     >

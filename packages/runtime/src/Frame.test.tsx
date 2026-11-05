@@ -136,16 +136,67 @@ describe("Frame", () => {
     );
   });
 
-  it("renders mode as data-mode on the frame wrapping its descendants", () => {
+  it("passes data-* axes through to the section", () => {
     const { container } = render(
-      <Frame width={100} height={100} mode="dark">
+      <Frame width={100} height={100} data-mode="dark" data-density="condensed">
         <span data-testid="child">x</span>
       </Frame>,
     );
     const section = container.querySelector("section");
     expect(section?.getAttribute("data-mode")).toBe("dark");
+    expect(section?.getAttribute("data-density")).toBe("condensed");
     const child = container.querySelector('[data-testid="child"]');
-    expect(child?.closest('[data-mode="dark"]')).toBe(section);
+    expect(child?.closest('[data-mode="dark"][data-density="condensed"]')).toBe(
+      section,
+    );
+  });
+
+  it("lets nested frames override only their declared axes", () => {
+    const { container } = render(
+      <Frame width={200} height={200} data-mode="dark" data-density="regular">
+        <Frame
+          data-testid="inner"
+          width={100}
+          height={100}
+          data-density="condensed"
+        />
+      </Frame>,
+    );
+    const sections = container.querySelectorAll("section");
+    const outer = sections[0];
+    const inner = sections[1];
+    expect(outer?.getAttribute("data-mode")).toBe("dark");
+    expect(outer?.getAttribute("data-density")).toBe("regular");
+    expect(inner?.getAttribute("data-density")).toBe("condensed");
+    expect(inner?.hasAttribute("data-mode")).toBe(false);
+    expect(inner?.closest('[data-mode="dark"]')).toBe(outer);
+  });
+
+  it("keeps data-name from props or rest without a mode prop", () => {
+    const named = render(
+      <Frame width={100} height={100} name="hero" data-mode="dark" />,
+    );
+    expect(
+      named.container.querySelector("section")?.getAttribute("data-name"),
+    ).toBe("hero");
+    expect(
+      named.container.querySelector("section")?.getAttribute("data-mode"),
+    ).toBe("dark");
+
+    const raw = render(
+      <Frame
+        width={100}
+        height={100}
+        data-name="raw"
+        data-density="condensed"
+      />,
+    );
+    expect(
+      raw.container.querySelector("section")?.getAttribute("data-name"),
+    ).toBe("raw");
+    expect(
+      raw.container.querySelector("section")?.getAttribute("data-density"),
+    ).toBe("condensed");
   });
 
   it("absolutely positions nested frames inside a free-layout frame", () => {
@@ -172,7 +223,13 @@ describe("Frame", () => {
     const { container } = render(
       <Frame width={400} height={400} layout="vertical">
         <Frame data-testid="flex-child" width={100} height={50}>
-          <Frame data-testid="free-grandchild" x={5} y={6} width={10} height={10} />
+          <Frame
+            data-testid="free-grandchild"
+            x={5}
+            y={6}
+            width={10}
+            height={10}
+          />
         </Frame>
         <Frame width={100} height={100} grid={{ columns: 2 }}>
           <Frame data-testid="grid-child" width={10} height={10} />

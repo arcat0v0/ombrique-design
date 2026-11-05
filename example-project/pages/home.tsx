@@ -1,8 +1,17 @@
-import { Frame, Rect, Text, Ellipse, Star } from "@ombrique/runtime";
+import { Frame, Rect, Text, Ellipse } from "@ombrique/runtime";
 
 export default function Home() {
   return (
-    <Frame name="Home" x={0} y={0} width={1440} height={900} fill="#ffffff">
+    <Frame
+      name="Home"
+      x={0}
+      y={0}
+      width={1440}
+      height={900}
+      fill="#ffffff"
+      data-mode="light"
+      data-density="regular"
+    >
       <Ellipse
         data-name="ellipse"
         fill="#d9d9d9"
@@ -35,6 +44,7 @@ export default function Home() {
         height={56}
         fill="#ff3366"
         radius={12}
+        data-density="condensed"
       >
         <Text x={16} y={18} width={164} fontSize={17} fill="#ffffff">
           Get started
@@ -94,7 +104,8 @@ export default function Home() {
           Pixel faithful
         </Text>
         <Text x={32} y={74} width={288} fontSize={15} fill="#5b5b6b">
-          Chromium lays out and paints; the compositor only moves textures around.
+          Chromium lays out and paints; the compositor only moves textures
+          around.
         </Text>
       </Frame>
     </Frame>

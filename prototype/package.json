@@ -6,6 +6,9 @@
   "scripts": {
     "probe": "PROTO_MODE=probe electron .",
     "bench": "PROTO_MODE=test electron .",
+    "shader:capture": "PROTO_MODE=shader-capture electron .",
+    "shader:anim": "PROTO_MODE=shader-anim electron .",
+    "shader:all": "npm run shader:capture && npm run shader:anim",
     "start": "electron ."
   },
   "devDependencies": {

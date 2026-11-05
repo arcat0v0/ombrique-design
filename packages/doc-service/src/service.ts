@@ -6,15 +6,8 @@ import type {
   Manifest,
 } from "@ombrique/protocol";
 import { manifestSchema } from "@ombrique/protocol";
-
-export class TransactionRejectedError extends Error {
-  constructor() {
-    super("transaction rejected");
-    this.name = "TransactionRejectedError";
-  }
-}
 import { readFileSync, watch, type FSWatcher } from "node:fs";
-import { History } from "./history";
+import { History, type HistoryEntryView } from "./history";
 import {
   hashText,
   listDesignFiles,
@@ -32,9 +25,26 @@ import {
   type ProjectSnapshot,
 } from "./project";
 
+export class TransactionRejectedError extends Error {
+  constructor(message = "transaction rejected") {
+    super(message);
+    this.name = "TransactionRejectedError";
+  }
+}
+
 export interface DocumentServiceOptions {
   emit?: (message: DocToShell) => void;
   watchInterval?: number;
+}
+
+interface CommitOptions {
+  before: Map<string, string>;
+  after: Map<string, string>;
+  files: string[];
+  actor: string;
+  deletedPageFile?: string;
+  recordHistory: boolean;
+  emitDiagnostics: boolean;
 }
 
 export class DocumentService {
@@ -42,12 +52,15 @@ export class DocumentService {
   private history = new History();
   private watcher: FSWatcher | null = null;
   private selfWrites = new Map<string, string>();
-  private emit: (message: DocToShell) => void;
+  private send: (message: DocToShell) => void;
+  private writeQueue: Array<() => void> = [];
+  private pendingEmits: DocToShell[] = [];
+  private writing = false;
   private counter = 0;
   private externalTimer: NodeJS.Timeout | undefined;
 
   constructor(options: DocumentServiceOptions = {}) {
-    this.emit = options.emit ?? (() => {});
+    this.send = options.emit ?? (() => {});
   }
 
   get root(): string {
@@ -84,11 +97,62 @@ export class DocumentService {
     this.watcher = null;
     clearTimeout(this.externalTimer);
     this.externalTimer = undefined;
+    this.writeQueue = [];
+    this.pendingEmits = [];
     this.snapshot = null;
     this.history.clear();
   }
 
-  apply(commands: EditCommand[], _baseVersions: string[]): AppliedTransaction {
+  private emit(message: DocToShell): void {
+    if (this.writing) {
+      this.pendingEmits.push(message);
+      return;
+    }
+    this.send(message);
+  }
+
+  private enqueueWrite<T>(operation: () => T): T {
+    const slot: { result?: T; error?: unknown; failed?: boolean } = {};
+    this.writeQueue.push(() => {
+      try {
+        slot.result = operation();
+      } catch (error) {
+        slot.failed = true;
+        slot.error = error;
+      }
+    });
+    this.drainWrites();
+    if (slot.failed) throw slot.error;
+    return slot.result as T;
+  }
+
+  private drainWrites(): void {
+    if (this.writing) return;
+    this.writing = true;
+    try {
+      while (this.writeQueue.length > 0) {
+        const operation = this.writeQueue.shift();
+        operation?.();
+      }
+    } finally {
+      this.writing = false;
+    }
+    const pending = this.pendingEmits.splice(0);
+    for (const message of pending) this.send(message);
+  }
+
+  apply(
+    commands: EditCommand[],
+    _baseVersions: string[],
+    actor = "designer",
+  ): AppliedTransaction {
+    return this.enqueueWrite(() => this.applyCommands(commands, actor));
+  }
+
+  private applyCommands(
+    commands: EditCommand[],
+    actor: string,
+  ): AppliedTransaction {
     const snapshot = this.project;
     const files = this.filesFor(commands, snapshot);
     this.refreshExternal(files);
@@ -102,69 +166,53 @@ export class DocumentService {
     }
 
     const before = new Map<string, string>();
-    for (const file of outcome.changedFiles) {
-      before.set(file, snapshot.files.get(file)?.text ?? "");
-    }
-
-    for (const file of outcome.changedFiles) {
-      const text = outcome.texts.get(file) ?? "";
-      const absolute = resolveInside(snapshot.root, file);
-      writeFileAtomic(absolute, text);
-      this.selfWrites.set(file, hashText(text));
-      snapshot.files.set(file, { text, version: hashText(text) });
-    }
-
-    if (outcome.deletedPageFile) {
-      const file = outcome.deletedPageFile;
-      if (file !== MANIFEST_NAME) {
-        removeFile(resolveInside(snapshot.root, file));
-        snapshot.files.delete(file);
-        this.selfWrites.delete(file);
-      }
-    }
-
-    const manifestText = outcome.texts.get(MANIFEST_NAME);
-    if (manifestText) {
-      this.selfWrites.set(MANIFEST_NAME, hashText(manifestText));
-      snapshot.manifest = manifestSchema.parse(JSON.parse(manifestText));
-    }
-
-    rebuildIndex(snapshot);
-
     const after = new Map<string, string>();
     for (const file of outcome.changedFiles) {
+      before.set(file, snapshot.files.get(file)?.text ?? "");
       after.set(file, outcome.texts.get(file) ?? "");
     }
-    const contentChanged = outcome.changedFiles.some(
-      (file) => before.get(file) !== after.get(file),
-    );
-    if (contentChanged)
-      this.history.record({ before, after, files: outcome.changedFiles });
 
-    this.counter += 1;
-    const transaction: AppliedTransaction = {
-      id: `t${this.counter}`,
-      changedFiles: outcome.changedFiles,
-      versions: currentVersions(snapshot, outcome.changedFiles),
-      origin: "designer",
-    };
-    this.emit({ kind: "transactionApplied", transaction });
-    this.emitHistory();
-    this.emitManifest();
-    return transaction;
+    return this.commit({
+      before,
+      after,
+      files: outcome.changedFiles,
+      actor,
+      deletedPageFile: outcome.deletedPageFile,
+      recordHistory: outcome.changedFiles.length > 0,
+      emitDiagnostics: false,
+    });
   }
 
   undo(): AppliedTransaction | null {
-    const entry = this.history.undo();
-    if (!entry) return null;
-    return this.restore(entry.before, entry.files);
+    return this.enqueueWrite(() => {
+      const entry = this.history.undo();
+      if (!entry) return null;
+      return this.commit({
+        before: entry.after,
+        after: entry.before,
+        files: entry.files,
+        actor: "designer",
+        recordHistory: false,
+        emitDiagnostics: true,
+      });
+    });
   }
 
   redo(): AppliedTransaction | null {
-    const entry = this.history.redo();
-    if (!entry) return null;
-    return this.restore(entry.after, entry.files);
+    return this.enqueueWrite(() => {
+      const entry = this.history.redo();
+      if (!entry) return null;
+      return this.commit({
+        before: entry.before,
+        after: entry.after,
+        files: entry.files,
+        actor: "designer",
+        recordHistory: false,
+        emitDiagnostics: true,
+      });
+    });
   }
+
   get canUndo(): boolean {
     return this.history.canUndo;
   }
@@ -173,41 +221,121 @@ export class DocumentService {
     return this.history.canRedo;
   }
 
-  private restore(
-    texts: Map<string, string>,
-    files: string[],
-  ): AppliedTransaction {
+  private commit(options: CommitOptions): AppliedTransaction {
     const snapshot = this.project;
-    for (const [file, text] of texts) {
+    const conflict = this.verifySnapshot(
+      snapshot,
+      options.files,
+      options.deletedPageFile,
+    );
+    if (conflict) {
+      const message = `文件 ${conflict} 已被外部修改,请刷新后重试`;
+      this.emit({ kind: "commandFailed", message });
+      throw new TransactionRejectedError(message);
+    }
+
+    for (const file of options.files) {
+      const text = options.after.get(file) ?? "";
+      const absolute = resolveInside(snapshot.root, file);
       if (text === "") {
-        removeFile(resolveInside(snapshot.root, file));
+        removeFile(absolute);
         snapshot.files.delete(file);
         this.selfWrites.delete(file);
       } else {
-        writeFileAtomic(resolveInside(snapshot.root, file), text);
-        this.selfWrites.set(file, hashText(text));
-        snapshot.files.set(file, { text, version: hashText(text) });
+        writeFileAtomic(absolute, text);
+        this.setFileState(snapshot, file, text);
       }
     }
-    const manifestText = texts.get(MANIFEST_NAME);
+
+    if (
+      options.deletedPageFile &&
+      options.deletedPageFile !== MANIFEST_NAME &&
+      !options.files.includes(options.deletedPageFile)
+    ) {
+      removeFile(resolveInside(snapshot.root, options.deletedPageFile));
+      snapshot.files.delete(options.deletedPageFile);
+      this.selfWrites.delete(options.deletedPageFile);
+    }
+
+    const manifestText = options.after.get(MANIFEST_NAME);
     if (manifestText)
       snapshot.manifest = manifestSchema.parse(JSON.parse(manifestText));
     rebuildIndex(snapshot);
+
+    if (options.recordHistory) {
+      this.history.record({
+        before: options.before,
+        after: options.after,
+        files: options.files,
+        actor: options.actor,
+      });
+    }
+
+    this.counter += 1;
     const transaction: AppliedTransaction = {
       id: `t${this.counter}`,
-      changedFiles: files,
-      versions: currentVersions(snapshot, files),
-      origin: "designer",
+      changedFiles: options.files,
+      versions: currentVersions(snapshot, options.files),
+      origin: options.actor === "designer" ? "designer" : "agent",
+      actor: options.actor,
     };
     this.emit({ kind: "transactionApplied", transaction });
     this.emitHistory();
     this.emitManifest();
-    this.emitDiagnostics();
+    if (options.emitDiagnostics) this.emitDiagnostics();
     return transaction;
+  }
+
+  private verifySnapshot(
+    snapshot: ProjectSnapshot,
+    files: string[],
+    deletedPageFile?: string,
+  ): string | null {
+    const checked = [...files];
+    if (
+      deletedPageFile &&
+      deletedPageFile !== MANIFEST_NAME &&
+      !checked.includes(deletedPageFile)
+    )
+      checked.push(deletedPageFile);
+    for (const file of checked) {
+      const state = snapshot.files.get(file);
+      let diskText: string | null = null;
+      try {
+        diskText = readFileSync(resolveInside(snapshot.root, file), "utf8");
+      } catch {
+        diskText = null;
+      }
+      if (!state) {
+        if (diskText !== null) return file;
+        continue;
+      }
+      if (diskText === null) return file;
+      if (hashText(diskText) !== hashText(state.text)) return file;
+    }
+    return null;
+  }
+
+  private setFileState(
+    snapshot: ProjectSnapshot,
+    file: string,
+    text: string,
+  ): void {
+    const version = hashText(text);
+    this.selfWrites.set(file, version);
+    snapshot.files.set(file, { text, version });
   }
 
   restoreVersion(
     targetFiles: Record<string, string>,
+    actor = "designer",
+  ): AppliedTransaction | null {
+    return this.enqueueWrite(() => this.restoreVersionNow(targetFiles, actor));
+  }
+
+  private restoreVersionNow(
+    targetFiles: Record<string, string>,
+    actor: string,
   ): AppliedTransaction | null {
     const snapshot = this.project;
     const before = new Map<string, string>();
@@ -241,9 +369,22 @@ export class DocumentService {
     }
 
     if (touched.length === 0) return null;
+    return this.commit({
+      before,
+      after,
+      files: touched,
+      actor,
+      recordHistory: true,
+      emitDiagnostics: true,
+    });
+  }
 
-    this.history.record({ before, after, files: touched });
-    return this.restore(after, touched);
+  historyEntries(): readonly HistoryEntryView[] {
+    return this.history.entries();
+  }
+
+  historyEntry(id: string): HistoryEntryView | null {
+    return this.history.get(id);
   }
 
   private filesFor(
@@ -275,7 +416,7 @@ export class DocumentService {
           for (const element of snapshot.index.elements.values()) {
             if (
               element.tag === "Frame" &&
-              element.attrs.mode?.value === command.name
+              element.attrs["data-mode"]?.value === command.name
             )
               files.add(element.ref.file);
           }
@@ -362,7 +503,7 @@ export class DocumentService {
     const snapshot = this.snapshot;
     if (!snapshot) return [];
     const changed: string[] = [];
-    const droppedIds: string[] = [];
+    const staleIds: string[] = [];
     for (const file of files) {
       const absolute = resolveInside(snapshot.root, file);
       let text: string;
@@ -372,6 +513,7 @@ export class DocumentService {
         if (snapshot.files.delete(file)) {
           changed.push(file);
           this.selfWrites.delete(file);
+          staleIds.push(...this.history.invalidate([file]));
         }
         continue;
       }
@@ -379,12 +521,13 @@ export class DocumentService {
       const known = snapshot.files.get(file);
       if (known && known.version === version) continue;
       if (this.selfWrites.get(file) === version) {
-        snapshot.files.set(file, { text, version });
+        this.setFileState(snapshot, file, text);
         continue;
       }
+      this.selfWrites.delete(file);
       snapshot.files.set(file, { text, version });
       changed.push(file);
-      droppedIds.push(...this.history.invalidate([file]));
+      staleIds.push(...this.history.invalidate([file]));
     }
     if (changed.length === 0) return [];
     try {
@@ -402,7 +545,7 @@ export class DocumentService {
         origin: "external",
       },
     });
-    if (droppedIds.length > 0) this.emitHistory();
+    if (staleIds.length > 0) this.emitHistory();
     this.emitManifest();
     this.emitDiagnostics();
     return changed;
@@ -469,10 +612,13 @@ export class DocumentService {
   }
 
   writeRaw(file: string, text: string): void {
+    this.enqueueWrite(() => this.writeRawNow(file, text));
+  }
+
+  private writeRawNow(file: string, text: string): void {
     const snapshot = this.project;
     writeFileAtomic(resolveInside(snapshot.root, file), text);
-    this.selfWrites.set(file, hashText(text));
-    snapshot.files.set(file, { text, version: hashText(text) });
+    this.setFileState(snapshot, file, text);
     rebuildIndex(snapshot);
   }
 }

@@ -2,6 +2,8 @@
   "formatVersion": 1,
   "pages": [
     { "id": "home", "name": "Home", "file": "pages/home.tsx" },
-    { "id": "pricing", "name": "Pricing", "file": "pages/pricing.tsx" }
+    { "id": "pricing", "name": "Pricing", "file": "pages/pricing.tsx" },
+    { "id": "showcase", "name": "Showcase", "file": "pages/showcase.tsx" },
+    { "id": "shader", "name": "Shader", "file": "pages/shader.tsx" }
   ]
 }

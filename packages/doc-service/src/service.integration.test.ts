@@ -498,7 +498,7 @@ describe("DocumentService layout props & constraints", () => {
     const frame = service.project.index.pages[0]?.root;
     if (!frame) throw new Error("missing root Frame");
     service.apply(
-      [{ kind: "setAttrs", target: frame.ref, attrs: { mode: "dark" } }],
+      [{ kind: "setAttrs", target: frame.ref, attrs: { "data-mode": "dark" } }],
       [],
     );
     const beforeRename = readFileSync(join(root, "tokens.css"), "utf8");
@@ -516,18 +516,18 @@ describe("DocumentService layout props & constraints", () => {
       '[data-mode="Night"]',
     );
     expect(readFileSync(join(root, "pages/home.tsx"), "utf8")).toContain(
-      'mode="Night"',
+      'data-mode="Night"',
     );
     service.apply([{ kind: "deleteTokenMode", name: "Night" }], []);
     expect(readFileSync(join(root, "tokens.css"), "utf8")).toBe(
       ":root {\n  --bg: white;\n}\n",
     );
     expect(readFileSync(join(root, "pages/home.tsx"), "utf8")).not.toContain(
-      "mode=",
+      "data-mode=",
     );
     service.undo();
     expect(readFileSync(join(root, "pages/home.tsx"), "utf8")).toContain(
-      'mode="Night"',
+      'data-mode="Night"',
     );
     expect(
       service.project.index.styles.tokens.modes.map((mode) => mode.name),
@@ -536,6 +536,29 @@ describe("DocumentService layout props & constraints", () => {
     expect(readFileSync(join(root, "tokens.css"), "utf8")).not.toContain(
       "data-mode",
     );
+  });
+
+  it("collects data-mode Frame files for token mode rename after an external edit", () => {
+    service.apply([{ kind: "addTokenMode", name: "dark" }], []);
+    const frame = service.project.index.pages[0]?.root;
+    if (!frame) throw new Error("missing root Frame");
+    service.apply(
+      [{ kind: "setAttrs", target: frame.ref, attrs: { "data-mode": "dark" } }],
+      [],
+    );
+    const external = readFileSync(join(root, "pages/home.tsx"), "utf8").replace(
+      "Ship faster",
+      "Ship externally",
+    );
+    writeFileSync(join(root, "pages/home.tsx"), external);
+    const renamed = service.apply(
+      [{ kind: "renameTokenMode", name: "dark", newName: "night" }],
+      [],
+    );
+    expect(renamed.changedFiles).toContain("pages/home.tsx");
+    const home = readFileSync(join(root, "pages/home.tsx"), "utf8");
+    expect(home).toContain("Ship externally");
+    expect(home).toContain('data-mode="night"');
   });
 
   it("updates shared styles in scss files with undo/redo", () => {

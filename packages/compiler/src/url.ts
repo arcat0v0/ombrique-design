@@ -35,6 +35,7 @@ const MIME: Record<string, string> = {
   ".webp": "image/webp",
   ".woff": "font/woff",
   ".woff2": "font/woff2",
+  ".glsl": "text/plain",
 };
 
 export function mimeFor(path: string): string {

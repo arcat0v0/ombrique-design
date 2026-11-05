@@ -7,6 +7,15 @@ export {
 } from "./camera";
 export type { Camera, Rect, Vec2 } from "./camera";
 export { UploadQueue } from "./uploadQueue";
+export {
+  placeShaders,
+  shaderTextureSize,
+} from "./shader-layer";
+export type {
+  ShaderAnchorPlacement,
+  ShaderInit,
+  ShaderWorldPlacement,
+} from "./shader-layer";
 export { createCompositor } from "./compositor";
 export type {
   BoardInit,

@@ -674,9 +674,6 @@ function classifyStyleGroups(styles: StyleRow[], tag?: string): StyleGroup[] {
     if (isBoolean && row.key === "op") {
       continue;
     }
-    if (lowerTag === "frame" && row.key === "mode") {
-      continue;
-    }
     if (isFrame && AUTO_LAYOUT_KEYS[row.key]) {
       continue;
     }
@@ -1367,7 +1364,6 @@ interface ModeSectionProps {
   onSetAttrs?: (
     attrs: Record<string, string | number | boolean | null>,
   ) => void;
-  onSetStyle: (key: string, value: string | number | boolean | null) => void;
 }
 
 function ModeSection({
@@ -1375,20 +1371,13 @@ function ModeSection({
   tokenModes,
   disabled,
   onSetAttrs,
-  onSetStyle,
 }: ModeSectionProps) {
   if (selection.tag.toLowerCase() !== "frame") return null;
   const current =
-    selection.styles.find((row) => row.key === "mode")?.value ??
-    selection.attrs.find((attr) => attr.key === "mode")?.value ??
-    "";
+    selection.attrs.find((attr) => attr.key === "data-mode")?.value ?? "";
   if (tokenModes.length === 0 && current === "") return null;
   const choose = (value: string | null) => {
-    if (onSetAttrs) {
-      onSetAttrs({ mode: value });
-    } else {
-      onSetStyle("mode", value);
-    }
+    if (onSetAttrs) onSetAttrs({ "data-mode": value });
   };
   const options: Array<{ value: string | null; label: string }> = [
     { value: null, label: "继承 (Inherit)" },
@@ -2265,7 +2254,6 @@ export function PropertiesPanel({
               tokenModes={tokenModes}
               disabled={disabled}
               onSetAttrs={onSetAttrs}
-              onSetStyle={onSetStyle}
             />
             <PrototypeSection
               selection={selection}

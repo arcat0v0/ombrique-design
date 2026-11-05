@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld("protoBridge", {
   reportProbe: (data) => ipcRenderer.send("proto-probe", data),
   askIsolated: () => ipcRenderer.send("proto-isolated", { reason: "poll", paintCount, lastChanged }),
   shot: (name) => ipcRenderer.invoke("proto-shot", name),
+  counts: () => ({ paintCount, lastChanged }),
   results: (data) => ipcRenderer.send("proto-results", data),
 });
 

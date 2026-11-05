@@ -51,6 +51,7 @@ import {
   writeRecentProjectRecords,
 } from "./recent-projects";
 import { scaffoldProject } from "./project-scaffold";
+import { AgentBridge } from "./agent-bridge";
 
 const here = __dirname;
 const rendererDir = join(here, "../renderer");
@@ -80,6 +81,7 @@ interface DocHost {
 }
 
 let docHost: DocHost | null = null;
+let agentBridge: AgentBridge | null = null;
 let projectRoot: string | null = null;
 let projectOpenMeta: {
   root: string;
@@ -240,6 +242,7 @@ function registerProtocol() {
 function wireDocHost(host: DocHost) {
   host.onMessage((message) => {
     const type = message.type;
+    if (agentBridge?.handleDocHostMessage(message)) return;
     if (type === "ready") {
       if (projectRoot)
         host.send({
@@ -254,6 +257,7 @@ function wireDocHost(host: DocHost) {
       type === "resolveResult" ||
       type === "treeResult" ||
       type === "versionsResult" ||
+      type === "historyResult" ||
       type === "tokensResult" ||
       type === "stylesResult"
     ) {
@@ -268,6 +272,7 @@ function wireDocHost(host: DocHost) {
     if (type === "project") {
       const root = String(message.root);
       projectRoot = root;
+      agentBridge?.projectOpened(root);
       projectFiles = (message.files as Record<string, string>) ?? {};
       const manifest = message.manifest as { pages?: unknown[] } | undefined;
       pendingProjectMessage = message;
@@ -541,6 +546,7 @@ function openProjectRoot(
 ): void {
   projectRoot = root;
   projectOpenMeta = { root, label: label ?? basename(root), transient };
+  agentBridge?.projectClosed("switch");
   ensureDocHost().send({
     type: "shell",
     message: { kind: "openProject", path: root },
@@ -617,6 +623,11 @@ ipcMain.handle("ombrique:tree", async (_event, file: string) => {
 ipcMain.handle("ombrique:versions", async () => {
   const result = await request({ type: "versions", root: projectRoot });
   return result.versions ?? {};
+});
+
+ipcMain.handle("ombrique:history", async () => {
+  const result = await request({ type: "history", root: projectRoot });
+  return result.entries ?? [];
 });
 
 ipcMain.handle("ombrique:listTokens", async () => {
@@ -780,6 +791,7 @@ ipcMain.handle("ombrique:showWorkspace", () => {
   canvasVisible = false;
   canvasView?.setVisible(false);
   shellWindow?.setTitle("Ombrique");
+  agentBridge?.projectClosed("closed");
   return true;
 });
 
@@ -810,6 +822,10 @@ ipcMain.on(
       if (!canvasView || event.sender !== canvasView.webContents) return;
       canvasReady = true;
       flushCanvasMessages();
+      canvasView.webContents.send(
+        "ombrique:agentPresence",
+        agentBridge?.presenceSnapshot() ?? { kind: "clear" },
+      );
       return;
     }
     if (payload.channel === "ombrique:toolChanged") {
@@ -860,6 +876,32 @@ interface E2eStyles {
   }>;
 }
 
+async function captureCanvasScreenshot(): Promise<{
+  mimeType: "image/png" | "image/jpeg";
+  data: string;
+  width: number;
+  height: number;
+}> {
+  if (!canvasView || !canvasReady || !canvasVisible)
+    throw new Error("canvas is not visible");
+  const image = await canvasView.webContents.capturePage();
+  const size = image.getSize();
+  const png = image.toPNG();
+  if (png.byteLength <= 2_500_000)
+    return {
+      mimeType: "image/png",
+      data: png.toString("base64"),
+      width: size.width,
+      height: size.height,
+    };
+  const jpeg = image.toJPEG(80);
+  return {
+    mimeType: "image/jpeg",
+    data: jpeg.toString("base64"),
+    width: size.width,
+    height: size.height,
+  };
+}
 async function requestCanvasExport(params: {
   file: string;
   path?: number[];
@@ -1330,6 +1372,18 @@ app.whenReady().then(() => {
   console.log("[ombrique] ready");
   registerProtocol();
   ensureDocHost();
+  agentBridge = new AgentBridge({
+    userData: app.getPath("userData"),
+    sendToDocHost: (message) => ensureDocHost().send(message),
+    captureScreenshot: () => captureCanvasScreenshot(),
+    exportNode: (request) => exportNode(request),
+    onPresence: (event) => {
+      canvasView?.webContents.send("ombrique:agentPresence", event);
+    },
+  });
+  void agentBridge.start().catch((error) => {
+    console.error("[ombrique] agent bridge failed", error);
+  });
   createShellWindow();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createShellWindow();
@@ -3656,6 +3710,8 @@ app.on("window-all-closed", () => {
 });
 
 app.on("quit", () => {
+  void agentBridge?.close();
+  agentBridge = null;
   docHost?.child.kill();
   docHost = null;
 });

@@ -28,5 +28,17 @@
         "organizeImports": "off"
       }
     }
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["packages/runtime/src/shader-renderer.ts"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "useHookAtTopLevel": "off"
+          }
+        }
+      }
+    }
+  ]
 }

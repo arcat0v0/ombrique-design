@@ -45,6 +45,12 @@
         pointer-events: none;
         z-index: 10;
       }
+      #presence {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        z-index: 15;
+      }
       .selection-box {
         position: absolute;
         border: 1px solid #4c8dff;
@@ -62,6 +68,7 @@
       <div id="ruler-cursor-y" style="position:absolute;left:0;height:1px;width:20px;background:#4c8dff;pointer-events:none;display:none;"></div>
     </div>
     <div id="overlay"></div>
+    <div id="presence"></div>
     <script type="module" src="/canvas-runtime.js"></script>
   </body>
 </html>

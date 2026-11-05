@@ -104,3 +104,40 @@ export default function Home() {
     }
   }, 20000);
 });
+
+describe("design compiler glsl reloads", () => {
+  it("forces a full reload when a glsl source is added or changed", async () => {
+    const reloads: WirePayload[] = [];
+    const added = Promise.withResolvers<void>();
+    let changedResolve: (() => void) | null = null;
+    compiler.setWire((payload) => {
+      if (payload.type !== "full-reload" || payload.path !== "*") return;
+      reloads.push(payload);
+      if (reloads.length === 1) added.resolve();
+      else changedResolve?.();
+    });
+    mkdirSync(join(root, "shaders"), { recursive: true });
+    writeFileSync(join(root, "shaders", "mesh.glsl"), "#version 300 es\n");
+    await added.promise;
+    const changed = Promise.withResolvers<void>();
+    changedResolve = changed.resolve;
+    writeFileSync(
+      join(root, "shaders", "mesh.glsl"),
+      "#version 300 es\nprecision highp float;\n",
+    );
+    await changed.promise;
+    expect(reloads.length).toBeGreaterThanOrEqual(2);
+
+    const source = await compiler.transform(
+      "/@ombrique-shader/1/shaders/mesh.glsl",
+    );
+    expect(source).toContain("export default");
+    expect(source).toContain("#version 300 es");
+    expect(source).toContain("precision highp float");
+
+    const missing = await compiler.transform(
+      "/@ombrique-shader/2/shaders/missing.glsl",
+    );
+    expect(missing).toBeNull();
+  }, 20000);
+});

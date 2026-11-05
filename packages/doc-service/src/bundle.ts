@@ -13,7 +13,14 @@ export interface BundlePayload {
   entries: Record<string, string>; // base64 encoded file contents
 }
 
-const INCLUDED_PREFIXES = ["pages", "components", "assets", "fonts"];
+const INCLUDED_PREFIXES = [
+  "pages",
+  "components",
+  "assets",
+  "fonts",
+  "icons",
+  "shaders",
+];
 const INCLUDED_ROOT_FILES = new Set(["ombrique.json", "tokens.css"]);
 
 function shouldIncludeFile(relPath: string): boolean {

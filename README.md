@@ -63,6 +63,21 @@ pnpm --filter @ombrique/desktop build
 pnpm --filter @ombrique/desktop start
 ```
 
+### 开发模式
+
+```bash
+# 先执行一次 electron-vite build，再启动 Electron 与 shell renderer dev server
+pnpm dev
+```
+
+`pnpm dev` 会先执行 `electron-vite build`，再启动 Electron 与 shell renderer dev server。Main/Preload 以构建产物运行，编辑器外壳（shell renderer）仍由 Vite dev server 提供并支持 HMR。画布窗口加载的 `canvas-runtime.js` 由主进程从 `apps/desktop/out/renderer/` 直接读取，**不在 dev server 的 HMR 范围内**：修改 `apps/desktop/src/canvas/**`、`packages/canvas` 或其他会被 canvas bundle 打包的代码后不会自动重建。需要手动重建：
+
+```bash
+pnpm --filter @ombrique/desktop build
+```
+
+重建后 reload canvas 或重启 `pnpm dev` 才能生效。
+
 ---
 
 ## 编辑器 UI 架构与规范
@@ -83,15 +98,42 @@ pnpm --filter @ombrique/desktop start
   - 递归图层树：无限级折叠/展开、拖拽防穿透事件隔离、双击重命名、右键上下文菜单。
   - 图层行悬浮快捷操作：实时锁定/解锁与显隐切换，具备按图层安全操作机制与防止旧状态误操作保障。
   - 设计变量面板 (Tokens)：CSS 变量可视化检索、颜色卡片即时预览与快速注入。
-  - 变量模式以 `tokens.css` 的 `:root` 表示默认值，额外模式使用 `[data-mode="dark"]`。默认模式可通过 `:root, [data-mode="light"]` 命名；变量表支持逐模式编辑和新增、重命名、删除模式，新增模式复制默认值。
+  - 变量模式以 `tokens.css` 的 `:root` 表示默认值，额外轴值使用原生属性选择器（如 `[data-mode="dark"]`、`[data-density="condensed"]`），组合轴使用组合选择器（如 `[data-mode="dark"][data-density="condensed"]`）；同 specificity 时按源码顺序级联。默认模式可通过 `:root, [data-mode="light"]` 命名；变量表支持逐模式编辑和新增、重命名、删除模式，新增模式复制默认值。
 - **属性检查器 (Properties Inspector)**:
   - **类型专属卡片**：针对 `Frame` (Auto Layout 方向/间距/内边距/对齐/换行)、`Text` (多行内容编辑与排版)、`Image` (源路径/透明度/圆角)、`Boolean` (并集/交集/差集/异或运算切换)、`Component` (主组件实例分离保护) 深度定制。
   - **几何与约束 (Geometry & Constraints)**: X/Y 坐标与 W/H 尺寸精准输入；位置与边距约束锚定。
   - **智能样式去重**：专用卡片属性自动从通用属性表中剔除，消除混杂重复呈现。
   - **Token 智能绑定**：支持十六进制与颜色变量智能解析联动。
-  - **Frame 变量模式**：属性检查器可设置 `<Frame mode="dark">`，运行时输出 `data-mode` 并通过真实 CSS 级联影响后代；选择继承会移除显式模式。重命名模式同步更新 Frame 引用，删除非默认模式后引用恢复继承。
+  - **Frame 变量轴**：属性检查器设置的是原生 `data-*` 属性；单轴写 `data-mode="dark"`，多轴写 `data-mode="dark" data-density="condensed"`，由原生属性透传与 CSS 自定义属性继承/级联解析。每个轴独立覆盖，嵌套只覆盖显式声明的轴；重命名或删除 mode 时同步更新 `data-mode` 引用。
   - **Figma 级导出配置 (Export)**：支持选中节点与当前画板的多行导出设置（倍率 0.5x/1x/2x/3x/4x 或自定义宽度如 512w、格式 PNG/JPG/SVG/PDF/WebP、自定义后缀），通过 `data-export` 属性无缝持久化至 TSX 源码；支持单文件直接保存或多配置批量导出到目录。
   - 模态弹窗（新建变量、创建组件、页面管理、实例分离）均经过侧边栏可视区域物理锚定，彻底解决 Electron 原生画布子视图遮挡前端弹出层的问题。
+
+---
+
+## 静态 Shader 节点
+
+`@ombrique/runtime` 提供 `<Shader>` 原语，将 GLSL ES 3.00 片元着色器作为静态图层叠加在画板之上：
+
+```tsx
+<Shader
+  name="MeshGradient"
+  x={64}
+  y={176}
+  width={720}
+  height={420}
+  radius={24}
+  src="shaders/mesh-gradient.glsl"
+  time={0}
+/>
+```
+
+- 着色器源文件放在项目的 `shaders/` 目录，并随 `.ombrique` 项目包一起打包；修改 `.glsl` 会触发热重载并重新读取源文件。
+- v1 仅提供 `u_time` 与 `u_resolution` 两个 uniform。`time` 默认为 0，只在挂载或属性变化时绘制一次，不启动动画循环，因此同一份源在任意时刻导出结果一致。
+- 着色器画布是宿主 `<canvas content="drawable">` 的直接 drawable 子节点，拥有独立纹理与 quad，始终绘制在画板之上；同层按文档顺序叠放。
+- 已知限制（v1）：
+  - 不做 pointer 命中测试：着色器区域不参与画布点击、框选与拖拽。
+  - 不做画板外裁剪：`x/y/width/height` 超出画板时不会被画板边界裁剪；导出时由导出目标尺寸自然裁剪。
+  - 不做 shader 动画、自定义 uniform，也不直接执行用户 WGSL。
 
 ---
 

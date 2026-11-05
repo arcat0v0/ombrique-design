@@ -2,7 +2,16 @@ import { Frame, Rect, Text } from "@ombrique/runtime";
 
 export default function Pricing() {
   return (
-    <Frame name="Pricing" x={0} y={0} width={1440} height={900} fill="#ffffff">
+    <Frame
+      name="Pricing"
+      x={0}
+      y={0}
+      width={1440}
+      height={900}
+      fill="#ffffff"
+      data-mode="light"
+      data-density="regular"
+    >
       <Text x={96} y={96} width={720} fontSize={48} fill="#14141a">
         Simple pricing
       </Text>

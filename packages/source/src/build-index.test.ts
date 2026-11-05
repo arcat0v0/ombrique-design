@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildIndex } from "./build-index.js";
+import { resolveTokenValue } from "./parse-stylesheet.js";
 import type { DesignElement } from "./types.js";
 
 const HOME = `import { Frame, Text } from "@ombrique/runtime";
@@ -163,6 +164,26 @@ describe("stylesheet indexing", () => {
     ]);
     expect(index.styles.tokens.tokens).toHaveLength(1);
     expect(index.styles.tokens.tokens[0]?.values).toEqual({ Light: "white" });
+  });
+
+  it("indexes axes and ordered rules for multi-axis tokens", () => {
+    const css =
+      ':root { --bg: white; }\n[data-mode="dark"] { --bg: black; }\n[data-density="condensed"] { --bg: #111; }\n';
+    const index = buildIndex({ "tokens.css": css });
+    expect(index.styles.tokens.axes.map((axis) => axis.name)).toEqual([
+      ":root",
+      "mode",
+      "density",
+    ]);
+    expect(index.styles.tokens.rules.map((rule) => rule.order)).toEqual([
+      0, 1, 2,
+    ]);
+    expect(
+      resolveTokenValue(index.styles.tokens, "--bg", {
+        mode: "dark",
+        density: "condensed",
+      }),
+    ).toBe("#111");
   });
 });
 

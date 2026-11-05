@@ -3,7 +3,12 @@ export {
   TransactionRejectedError,
   type DocumentServiceOptions,
 } from "./service";
-export { History, type HistoryEntry } from "./history";
+export {
+  History,
+  type HistoryEntry,
+  type HistoryEntryView,
+  type HistoryRecord,
+} from "./history";
 export {
   hashText,
   listDesignFiles,

@@ -1,3 +1,4 @@
+import type { HistorySnapshotEntry } from "@ombrique/protocol";
 import { describe, expect, it } from "vitest";
 import { createShellState, shouldRouteToAttrs, toSummary } from "./state";
 
@@ -822,23 +823,15 @@ describe("workspace and recent project actions", () => {
   });
 
   it("returns to the workspace and hides the canvas bridge", async () => {
-    type ProjectPayload = {
-      root: string;
-      manifest: {
-        formatVersion: 1;
-        pages: Array<{ id: string; name: string; file: string }>;
-      };
-      files: Record<string, string>;
-    };
     const handlers: {
-      project: ((payload: ProjectPayload) => void) | null;
+      project: ProjectHandler | null;
     } = { project: null };
     let workspaceCalls = 0;
     installBridge({
       ...baseBridge(),
       tree: async () => [],
       onProject: (cb) => {
-        handlers.project = cb as unknown as (payload: ProjectPayload) => void;
+        handlers.project = cb;
       },
       showWorkspace: async () => {
         workspaceCalls += 1;
@@ -861,5 +854,224 @@ describe("workspace and recent project actions", () => {
     expect(state.getView().pages).toEqual([]);
     expect(state.getView().manifest).toBeNull();
     expect(workspaceCalls).toBe(1);
+  });
+});
+
+type DocHandler = Parameters<ShellBridge["onDoc"]>[0];
+type FilesHandler = Parameters<ShellBridge["onFiles"]>[0];
+type ProjectHandler = Parameters<ShellBridge["onProject"]>[0];
+
+describe("edit history auto refresh", () => {
+  function entry(id: string, actor = "agent-1"): HistorySnapshotEntry {
+    return {
+      id,
+      actor,
+      stale: false,
+      createdAt: Date.now(),
+      files: ["pages/showcase.tsx"],
+      before: { "pages/showcase.tsx": "before" },
+      after: { "pages/showcase.tsx": `after-${id}` },
+    };
+  }
+
+  function transaction(id: string) {
+    return {
+      id,
+      changedFiles: ["pages/showcase.tsx"],
+      versions: { "pages/showcase.tsx": `v-${id}` },
+      origin: "agent" as const,
+      actor: "agent-1",
+    };
+  }
+
+  async function tick() {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+
+  it("refreshes the transaction list when the document service reports a history change", async () => {
+    let onDoc: DocHandler = () => {};
+    let entries: HistorySnapshotEntry[] = [];
+    installBridge({
+      onProject: () => {},
+      onFiles: () => {},
+      onDoc: (cb) => {
+        onDoc = cb;
+      },
+      onFatal: () => {},
+      onStats: () => {},
+      history: async () => entries,
+    });
+    const state = createShellState();
+
+    entries = [entry("h1"), entry("h2")];
+    onDoc({ kind: "historyChanged", canUndo: true, canRedo: false });
+
+    await tick();
+    expect(state.getView().editHistory).toHaveLength(2);
+    expect(state.getView().canUndo).toBe(true);
+  });
+
+  it("refreshes the transaction list when only transactionApplied arrives", async () => {
+    let onDoc: DocHandler = () => {};
+    let entries: HistorySnapshotEntry[] = [];
+    installBridge({
+      onProject: () => {},
+      onFiles: () => {},
+      onDoc: (cb) => {
+        onDoc = cb;
+      },
+      onFatal: () => {},
+      onStats: () => {},
+      history: async () => entries,
+    });
+    const state = createShellState();
+
+    entries = [entry("h1"), entry("h2")];
+    onDoc({ kind: "transactionApplied", transaction: transaction("t9") });
+
+    await tick();
+    expect(state.getView().editHistory).toHaveLength(2);
+  });
+
+  it("refreshes the transaction list when only the files snapshot arrives", async () => {
+    let onFiles: FilesHandler = () => {};
+    let entries: HistorySnapshotEntry[] = [];
+    installBridge({
+      onProject: () => {},
+      onFiles: (cb) => {
+        onFiles = cb;
+      },
+      onDoc: () => {},
+      onFatal: () => {},
+      onStats: () => {},
+      tree: async () => [],
+      history: async () => entries,
+    });
+    const state = createShellState();
+
+    entries = [entry("h1"), entry("h2")];
+    onFiles({ files: { "pages/showcase.tsx": "after" } });
+
+    await tick();
+    expect(state.getView().editHistory).toHaveLength(2);
+  });
+
+  it("refreshes the transaction list after a rollback without waiting for a doc event", async () => {
+    let onFiles: FilesHandler = () => {};
+    let entries: HistorySnapshotEntry[] = [entry("h1")];
+    const sent: unknown[] = [];
+    installBridge({
+      onProject: () => {},
+      onFiles: (cb) => {
+        onFiles = cb;
+      },
+      onDoc: () => {},
+      onFatal: () => {},
+      onStats: () => {},
+      tree: async () => [],
+      history: async () => entries,
+      send: async (message) => {
+        sent.push(message);
+        return true;
+      },
+    });
+    const state = createShellState();
+    await state.actions.refreshEditHistory?.();
+    expect(state.getView().editHistory).toHaveLength(1);
+
+    await state.actions.restoreEditHistory?.("h1");
+    entries = [entry("h1"), entry("h2", "designer")];
+    onFiles({ files: { "pages/showcase.tsx": "before" } });
+
+    await tick();
+    expect(state.getView().editHistory).toHaveLength(2);
+    expect(sent).toEqual([
+      {
+        kind: "restoreVersion",
+        files: { "pages/showcase.tsx": "before" },
+      },
+    ]);
+  });
+
+  it("coalesces a burst of triggers into one follow-up history read", async () => {
+    let onDoc: DocHandler = () => {};
+    let calls = 0;
+    const first = Promise.withResolvers<HistorySnapshotEntry[]>();
+    const second = Promise.withResolvers<HistorySnapshotEntry[]>();
+    installBridge({
+      onProject: () => {},
+      onFiles: () => {},
+      onDoc: (cb) => {
+        onDoc = cb;
+      },
+      onFatal: () => {},
+      onStats: () => {},
+      history: () => {
+        calls += 1;
+        return calls === 1 ? first.promise : second.promise;
+      },
+    });
+    const state = createShellState();
+
+    onDoc({ kind: "historyChanged", canUndo: true, canRedo: false });
+    onDoc({ kind: "transactionApplied", transaction: transaction("t9") });
+    await tick();
+    expect(calls).toBe(1);
+
+    first.resolve([entry("h1")]);
+    await tick();
+    expect(calls).toBe(2);
+
+    second.resolve([entry("h1"), entry("h2")]);
+    await tick();
+    expect(state.getView().editHistory).toHaveLength(2);
+    expect(calls).toBe(2);
+  });
+
+  it("drops an in-flight history read from before a project switch", async () => {
+    let onProject: ProjectHandler = () => {};
+    let calls = 0;
+    const stale = Promise.withResolvers<HistorySnapshotEntry[]>();
+    const current = Promise.withResolvers<HistorySnapshotEntry[]>();
+    installBridge({
+      onProject: (cb) => {
+        onProject = cb;
+      },
+      onFiles: () => {},
+      onDoc: () => {},
+      onFatal: () => {},
+      onStats: () => {},
+      tree: async () => [],
+      history: () => {
+        calls += 1;
+        return calls === 1 ? stale.promise : current.promise;
+      },
+    });
+    const state = createShellState();
+    void state.actions.refreshEditHistory?.();
+    await tick();
+    expect(calls).toBe(1);
+
+    onProject({
+      root: "/work/pricing-redesign",
+      manifest: {
+        formatVersion: 1,
+        pages: [{ id: "pricing", name: "Pricing", file: "pages/pricing.tsx" }],
+      },
+      files: {},
+    });
+
+    stale.resolve([entry("old")]);
+    await tick();
+    expect(calls).toBe(2);
+    expect(state.getView().editHistory?.some((item) => item.id === "old")).toBe(
+      false,
+    );
+
+    current.resolve([entry("current")]);
+    await tick();
+    expect(state.getView().editHistory?.map((item) => item.id)).toEqual([
+      "current",
+    ]);
   });
 });

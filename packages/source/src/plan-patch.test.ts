@@ -955,11 +955,11 @@ describe("planPatch: tokens", () => {
     ).toThrow(/Unknown/);
   });
 
-  it("renames mode selectors and Frame references, aliasing the default mode, then deletes them with fallback", () => {
+  it("renames mode selectors and data-mode Frame references, aliasing the default mode, then deletes them with fallback", () => {
     const css =
       ':root {\n  --bg: white;\n}\n\n[data-mode="dark"] {\n  --bg: black;\n}\n';
     const page =
-      'import { Frame } from "@ombrique/runtime";\nexport default function Home() { return <Frame mode="dark" />; }\n';
+      'import { Frame } from "@ombrique/runtime";\nexport default function Home() { return <Frame data-mode="dark" />; }\n';
     const renamed = patch(
       buildIndex({ "tokens.css": css, "pages/home.tsx": page }),
       { kind: "renameTokenMode", name: "dark", newName: "Night" },
@@ -982,7 +982,7 @@ describe("planPatch: tokens", () => {
       name: "Night",
     });
     expect(deleted.next["tokens.css"]).toBe(":root {\n  --bg: white;\n}\n");
-    expect(deleted.next["pages/home.tsx"]).not.toContain("mode=");
+    expect(deleted.next["pages/home.tsx"]).not.toContain("data-mode=");
     expect(() =>
       planPatch(buildIndex(deleted.next), {
         kind: "deleteTokenMode",
@@ -1020,6 +1020,53 @@ describe("planPatch: tokens", () => {
     expect(
       buildIndex({ "tokens.css": next }).styles.tokens.tokens[0]?.values,
     ).toEqual({ default: "white", "Night mode": "#111" });
+  });
+
+  it("rewrites data-mode Frame references and combined selectors", () => {
+    const css =
+      ':root { --bg: white; }\n\n[data-mode="dark"][data-density="condensed"] { --bg: black; }\n';
+    const page =
+      'import { Frame } from "@ombrique/runtime";\nexport default function Home() { return <Frame data-mode="dark" data-density="condensed" />; }\n';
+    const renamed = patch(
+      buildIndex({ "tokens.css": css, "pages/home.tsx": page }),
+      { kind: "renameTokenMode", name: "dark", newName: "Night" },
+    );
+    expect(renamed.next["tokens.css"]).toBe(css.replace('"dark"', '"Night"'));
+    expect(renamed.next["pages/home.tsx"]).toBe(
+      page.replace('"dark"', '"Night"'),
+    );
+    const deleted = patch(buildIndex(renamed.next), {
+      kind: "deleteTokenMode",
+      name: "Night",
+    });
+    expect(deleted.next["tokens.css"]).toBe(":root { --bg: white; }\n");
+    expect(deleted.next["pages/home.tsx"]).not.toContain('data-mode="Night"');
+  });
+
+  it("edits cells addressed by axis and axis value", () => {
+    const css =
+      ':root { --gap: 8px; --bg: white; }\n[data-density="condensed"] { --gap: 4px; }\n[data-mode="dark"][data-density="condensed"] { --gap: 2px; }\n';
+    const density = patch(buildIndex({ "tokens.css": css }), {
+      kind: "setTokenValue",
+      name: "--gap",
+      value: "3px",
+      mode: "ombrique density---condensed",
+    });
+    expect(density.next["tokens.css"]).toBe(css.replace("4px", "3px"));
+    const combined = patch(buildIndex({ "tokens.css": css }), {
+      kind: "setTokenValue",
+      name: "--gap",
+      value: "1px",
+      mode: "ombrique mode---dark density---condensed",
+    });
+    expect(combined.next["tokens.css"]).toBe(css.replace("2px", "1px"));
+    const root = patch(buildIndex({ "tokens.css": css }), {
+      kind: "setTokenValue",
+      name: "--bg",
+      value: "#eee",
+      mode: "ombrique root",
+    });
+    expect(root.next["tokens.css"]).toBe(css.replace("white", "#eee"));
   });
 });
 
@@ -1243,5 +1290,124 @@ export default function Home() {
       '<path d="M0 0 L50 0 L50 50 Z M50 50 L100 50 L100 100 Z" fill="#ff0000" data-name="UnionShape" />',
     );
     expect(next["pages/home.tsx"]).not.toContain("<Boolean");
+  });
+});
+
+describe("planPatch: icon", () => {
+  it("emits <Icon> nodes and registers the runtime import", () => {
+    const page = `import { Frame } from "@ombrique/runtime";
+
+export default function Home() {
+  return (
+    <Frame name="Home" x={0} y={0} width={1440} height={900}>
+      <div data-name="Hero" style={{ position: "absolute", left: 80, top: 120, width: 400 }} />
+    </Frame>
+  );
+}
+`;
+    const index = buildIndex({ "pages/home.tsx": page });
+    const hero = byName(index, "pages/home.tsx", "Hero");
+    const specs = [
+      {
+        kind: "icon",
+        name: "Logo",
+        x: 1,
+        y: 2,
+        width: 3,
+        height: 4,
+        iconSet: "lucide",
+        iconName: "house",
+        iconKind: "stroke",
+      },
+      {
+        kind: "icon",
+        name: "Mark",
+        x: 5,
+        y: 6,
+        width: 7,
+        height: 8,
+        iconSet: "mdi",
+        iconName: "home",
+        iconKind: "fill",
+        strokeWidth: 2,
+        fill: "#ff0000",
+        opacity: 0.5,
+      },
+    ] as const;
+    const { next } = patch(index, {
+      kind: "createNodes",
+      parent: hero.ref,
+      pageFile: "pages/home.tsx",
+      index: 0,
+      specs: [...specs],
+    });
+    const code = next["pages/home.tsx"] ?? "";
+    expect(code).toContain(
+      '<Icon data-name="Logo" x={1} y={2} width={3} height={4} iconSet="lucide" iconName="house" iconKind="stroke" />',
+    );
+    expect(code).toContain(
+      '<Icon data-name="Mark" x={5} y={6} width={7} height={8} iconSet="mdi" iconName="home" iconKind="fill" strokeWidth={2} fill="#ff0000" opacity={0.5} />',
+    );
+    expect(code).toContain('import { Frame, Icon } from "@ombrique/runtime";');
+  });
+});
+
+describe("planPatch: shader", () => {
+  it("emits a static <Shader> node and registers the runtime import", () => {
+    const page = `import { Frame } from "@ombrique/runtime";
+
+export default function Home() {
+  return (
+    <Frame name="Home" x={0} y={0} width={1440} height={900}>
+      <div data-name="Hero" style={{ position: "absolute", left: 80, top: 120, width: 400 }} />
+    </Frame>
+  );
+}
+`;
+    const index = buildIndex({ "pages/home.tsx": page });
+    const hero = byName(index, "pages/home.tsx", "Hero");
+    const specs = [
+      {
+        kind: "shader",
+        name: "Mesh",
+        x: 64,
+        y: 176,
+        width: 720,
+        height: 420,
+        radius: 28,
+        src: "shaders/mesh-gradient.glsl",
+        time: 0,
+      },
+      {
+        kind: "shader",
+        name: "Plain",
+        x: 1,
+        y: 2,
+        width: 3,
+        height: 4,
+        src: "shaders/plain.glsl",
+      },
+    ] as const;
+    const { next } = patch(index, {
+      kind: "createNodes",
+      parent: hero.ref,
+      pageFile: "pages/home.tsx",
+      index: 0,
+      specs: [...specs],
+    });
+    const code = next["pages/home.tsx"] ?? "";
+    expect(code).toContain(
+      '<Shader data-name="Mesh" x={64} y={176} width={720} height={420} src="shaders/mesh-gradient.glsl" time={0} radius={28} />',
+    );
+    expect(code).toContain(
+      '<Shader data-name="Plain" x={1} y={2} width={3} height={4} src="shaders/plain.glsl" />',
+    );
+    expect(code).toContain(
+      'import { Frame, Shader } from "@ombrique/runtime";',
+    );
+
+    const parsed = buildIndex(next);
+    expect(byName(parsed, "pages/home.tsx", "Mesh").tag).toBe("Shader");
+    expect(byName(parsed, "pages/home.tsx", "Mesh").kind).toBe("runtime");
   });
 });

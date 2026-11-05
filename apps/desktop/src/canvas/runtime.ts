@@ -25,7 +25,11 @@ import {
   type SnapResult,
   collectEqualGaps,
   snapRectToGuides,
+  placeShaders,
+  type ShaderAnchorPlacement,
+  type ShaderInit,
 } from "@ombrique/canvas";
+import { collectShaderBoards, layoutShaderAnchors } from "./shader-placement";
 import {
   type LayoutHandle,
   type PaddingEdge,
@@ -47,6 +51,20 @@ import {
   type WorldRect,
 } from "./selection-geometry";
 import { serializeNodeToSvg } from "./export-node";
+import {
+  EMPTY_PRESENCE_STATE,
+  applyPresenceEvent,
+  createPresencePaintScheduler,
+  isPresenceEvent,
+  presenceBoxVisual,
+  presenceFlashOpacity,
+  prunePresenceFlashes,
+  screenRectFromWorld,
+  type PresenceBoxVariant,
+  type PresencePaintScheduler,
+  type PresenceState,
+  type PresenceTarget,
+} from "../presence";
 interface CanvasBridge {
   onProject: (cb: (payload: ProjectMessage) => void) => void;
   onFiles: (cb: (payload: unknown) => void) => void;
@@ -55,6 +73,7 @@ interface CanvasBridge {
   onViewCommand: (cb: (payload: unknown) => void) => void;
   onPage: (cb: (pageId: string) => void) => void;
   onManifest: (cb: (payload: unknown) => void) => void;
+  onAgentPresence: (cb: (payload: unknown) => void) => void;
   send: (channel: string, payload: unknown) => void;
 }
 
@@ -147,8 +166,9 @@ function applyTokensCss(files: unknown) {
 
 const canvasElement = document.getElementById("cv");
 const overlayElement = document.getElementById("overlay");
+const presenceElement = document.getElementById("presence");
 
-if (!canvasElement || !overlayElement)
+if (!canvasElement || !overlayElement || !presenceElement)
   throw new Error("canvas host markup missing");
 
 const canvas: HTMLElement = canvasElement;
@@ -160,7 +180,10 @@ interface BoardRoot {
   unmount(): void;
 }
 
-const boards = new Map<string, { element: HTMLElement; reactRoot: BoardRoot }>();
+const boards = new Map<
+  string,
+  { element: HTMLElement; reactRoot: BoardRoot }
+>();
 const boardScales = new Map<Element, number>();
 const nodeIndex = new Map<Element, { file: string; path: number[] }>();
 let manifest: Manifest | null = null;
@@ -183,6 +206,9 @@ const nodeProps = new Map<
   { attrs: string[]; locked: boolean; generated: boolean }
 >();
 const camera = { x: 0, y: 0, z: 1 };
+let presenceState: PresenceState = EMPTY_PRESENCE_STATE;
+let presenceRaf = 0;
+let presenceScheduler: PresencePaintScheduler | null = null;
 const drag: {
   mode: DragMode;
   x: number;
@@ -725,11 +751,115 @@ function boardWorldOrigin(element: Element): { x: number; y: number } {
 }
 
 function parentWorldOrigin(element: Element): { x: number; y: number } {
-  return resolveParentOrigin(
-    element,
-    boardWorldOrigin(element),
-    worldRectOf,
+  return resolveParentOrigin(element, boardWorldOrigin(element), worldRectOf);
+}
+
+function shaderBoardPlacements(): ShaderAnchorPlacement[] {
+  const layout = collectShaderBoards(
+    boards.values(),
+    boardWorldOrigin,
+    boardAppliedScale,
   );
+  return layoutShaderAnchors(layout);
+}
+
+function readyShaderCanvases(): Map<string, HTMLCanvasElement> {
+  const out = new Map<string, HTMLCanvasElement>();
+  for (const element of stage.querySelectorAll<HTMLCanvasElement>(
+    "canvas[data-shader-id]",
+  )) {
+    const id = element.dataset.shaderId;
+    if (!id) continue;
+    if (element.dataset.shaderStatus !== "ready") continue;
+    out.set(id, element);
+  }
+  return out;
+}
+
+let lastShaderInits: ShaderInit[] | null = null;
+let shaderSyncRaf = 0;
+
+function syncShaders(force = false): void {
+  if (!compositor) return;
+  const canvases = readyShaderCanvases();
+  const placements = placeShaders(
+    shaderBoardPlacements(),
+    new Set(canvases.keys()),
+  );
+  const inits: ShaderInit[] = [];
+  for (const placement of placements) {
+    const element = canvases.get(placement.id);
+    if (!element) continue;
+    inits.push({
+      el: element,
+      worldX: placement.worldX,
+      worldY: placement.worldY,
+      worldW: placement.worldW,
+      worldH: placement.worldH,
+      radius: placement.radius,
+    });
+  }
+  const unchanged =
+    lastShaderInits !== null &&
+    lastShaderInits.length === inits.length &&
+    inits.every((init, index) => {
+      const previous = lastShaderInits?.[index];
+      return (
+        previous !== undefined &&
+        previous.el === init.el &&
+        previous.worldX === init.worldX &&
+        previous.worldY === init.worldY &&
+        previous.worldW === init.worldW &&
+        previous.worldH === init.worldH &&
+        previous.radius === init.radius
+      );
+    });
+  if (!force && unchanged) return;
+  lastShaderInits = inits;
+  for (const init of inits) {
+    init.el.style.transform = `translate(${init.worldX}px, ${init.worldY}px)`;
+    init.el.style.width = `${init.worldW}px`;
+    init.el.style.height = `${init.worldH}px`;
+    init.el.style.borderRadius = `${init.radius}px`;
+  }
+  if (inits.length > 0) {
+    const ordered = inits.map((init) => init.el);
+    const tail = Array.from(stage.children).slice(-ordered.length);
+    const stacked =
+      tail.length === ordered.length &&
+      ordered.every((element, index) => tail[index] === element);
+    if (!stacked) {
+      for (const element of ordered) stage.appendChild(element);
+    }
+  }
+  compositor.setShaders(inits);
+}
+
+function scheduleShaderSync(): void {
+  if (shaderSyncRaf !== 0) return;
+  shaderSyncRaf = requestAnimationFrame(() => {
+    shaderSyncRaf = 0;
+    syncShaders();
+  });
+}
+
+async function waitForShaderCanvases(timeoutMs = 1500): Promise<void> {
+  const deadline = performance.now() + timeoutMs;
+  while (performance.now() < deadline) {
+    let pending = false;
+    for (const element of stage.querySelectorAll<HTMLCanvasElement>(
+      "canvas[data-shader-id]",
+    )) {
+      if ((element.dataset.shaderStatus ?? "loading") === "loading") {
+        pending = true;
+        break;
+      }
+    }
+    if (!pending) return;
+    const { promise, resolve } = Promise.withResolvers<void>();
+    requestAnimationFrame(() => resolve());
+    await promise;
+  }
 }
 
 function boardAppliedScale(board: HTMLElement): number {
@@ -830,8 +960,7 @@ function updateBoardResolutions(): void {
 }
 
 let domBoard: { element: HTMLElement; worldX: number } | null = null;
-let pendingBoardSnapshot: { element: Element; node: HTMLElement } | null =
-  null;
+let pendingBoardSnapshot: { element: Element; node: HTMLElement } | null = null;
 let snapshotTimer: number | undefined;
 
 function domStageElement(): HTMLElement {
@@ -886,6 +1015,7 @@ function exitDomBoard(): void {
   element.style.transformOrigin = "";
   element.style.transform = `translate(${worldX}px, 0px)`;
   compositor?.resumeBoard(element);
+  scheduleShaderSync();
 }
 
 function ensureDragPreview(): void {
@@ -997,6 +1127,7 @@ async function mountPage(file: string) {
     void key;
   }
   compositor?.setBoards(allBoards);
+  syncShaders(true);
   const bounds = stage.getBoundingClientRect();
   if (allBoards.length > 0 && firstMount) {
     const totalWidth = allBoards.reduce(
@@ -1463,9 +1594,149 @@ async function navigatePrototypePage(
   updatePrototypeBar();
 }
 
+function presenceElementFor(target: PresenceTarget): Element | null {
+  const key = target.path.join("/");
+  for (const [element, info] of nodeIndex) {
+    if (info.file === target.file && info.path.join("/") === key)
+      return element;
+  }
+  return null;
+}
+
+function presenceScreenRect(target: PresenceTarget) {
+  const element = presenceElementFor(target);
+  if (!element) return null;
+  return screenRectFromWorld(worldRectOf(element), camera);
+}
+
+function applyPresenceBox(
+  layer: HTMLElement,
+  target: PresenceTarget,
+  color: string,
+  opacity: number,
+  variant: PresenceBoxVariant,
+) {
+  const rect = presenceScreenRect(target);
+  if (!rect) return;
+  const visual = presenceBoxVisual(color, variant);
+  const box = document.createElement("div");
+  box.dataset.presence = variant;
+  box.style.position = "absolute";
+  box.style.left = `${rect.left}px`;
+  box.style.top = `${rect.top}px`;
+  box.style.width = `${rect.width}px`;
+  box.style.height = `${rect.height}px`;
+  box.style.border = visual.border;
+  box.style.boxShadow = visual.boxShadow;
+  box.style.background = visual.background;
+  box.style.opacity = `${opacity}`;
+  box.style.pointerEvents = "none";
+  box.style.boxSizing = "border-box";
+  layer.appendChild(box);
+}
+
+function drawPresence() {
+  if (!presenceElement) return;
+  const now = Date.now();
+  presenceState = {
+    ...presenceState,
+    flashes: prunePresenceFlashes(presenceState.flashes, now),
+  };
+  presenceElement.replaceChildren();
+  for (const session of presenceState.sessions) {
+    for (const target of session.targets)
+      applyPresenceBox(
+        presenceElement,
+        target,
+        session.color,
+        1,
+        presenceState.conflict !== null &&
+          presenceState.conflict.target.file === target.file &&
+          presenceState.conflict.target.path.join("/") === target.path.join("/")
+          ? "conflict"
+          : "focus",
+      );
+  }
+  for (const flash of presenceState.flashes) {
+    const opacity = presenceFlashOpacity(flash, now);
+    if (opacity <= 0) continue;
+    for (const target of flash.targets)
+      applyPresenceBox(presenceElement, target, flash.color, opacity, "flash");
+  }
+  const hud = document.createElement("div");
+  hud.style.position = "absolute";
+  hud.style.right = "16px";
+  hud.style.top = "28px";
+  hud.style.display = "flex";
+  hud.style.flexDirection = "column";
+  hud.style.gap = "6px";
+  hud.style.padding = "8px 10px";
+  hud.style.borderRadius = "8px";
+  hud.style.background = "rgb(14 14 18 / 82%)";
+  hud.style.color = "#f5f5fa";
+  hud.style.font = "11px/1.4 ui-monospace, monospace";
+  hud.style.border = "1px solid rgb(255 255 255 / 14%)";
+  for (const session of presenceState.sessions) {
+    const row = document.createElement("div");
+    row.style.display = "flex";
+    row.style.alignItems = "center";
+    row.style.gap = "6px";
+    const dot = document.createElement("span");
+    dot.style.width = "8px";
+    dot.style.height = "8px";
+    dot.style.borderRadius = "50%";
+    dot.style.background = session.color;
+    const label = document.createElement("span");
+    label.textContent = session.actor;
+    row.appendChild(dot);
+    row.appendChild(label);
+    hud.appendChild(row);
+  }
+  if (presenceState.conflict) {
+    const conflict = document.createElement("div");
+    conflict.style.position = "absolute";
+    conflict.style.left = "50%";
+    conflict.style.top = "28px";
+    conflict.style.transform = "translateX(-50%)";
+    conflict.style.padding = "6px 10px";
+    conflict.style.borderRadius = "8px";
+    conflict.style.background = "rgb(180 40 40 / 88%)";
+    conflict.style.color = "#ffffff";
+    conflict.style.font = "11px/1.4 ui-monospace, monospace";
+    conflict.textContent = `Agent conflict: ${presenceState.conflict.actors.join(", ")} @ ${presenceState.conflict.target.file}`;
+    presenceElement.appendChild(conflict);
+  }
+  if (presenceState.sessions.length > 0) presenceElement.appendChild(hud);
+}
+
+function requestPresenceDraw() {
+  if (presenceRaf) return;
+  presenceRaf = requestAnimationFrame(() => {
+    presenceRaf = 0;
+    drawPresence();
+  });
+}
+
+function presencePaintScheduler(): PresencePaintScheduler {
+  presenceScheduler ??= createPresencePaintScheduler({
+    paint: drawPresence,
+    activeFlashes: () =>
+      presenceState.flashes.some(
+        (flash) => presenceFlashOpacity(flash, Date.now()) > 0,
+      ),
+  });
+  return presenceScheduler;
+}
+
+function applyPresence(payload: unknown) {
+  if (!isPresenceEvent(payload)) return;
+  presenceState = applyPresenceEvent(presenceState, payload, Date.now());
+  presencePaintScheduler().paintNow();
+}
 function drawOverlay() {
   if (!overlay) return;
   overlay.replaceChildren();
+  requestPresenceDraw();
   if (editingText) return;
   revalidateSelection();
 
@@ -2624,6 +2895,12 @@ async function init() {
     },
   });
   compositor.camera.set(camera);
+  document.addEventListener("ombrique:shader-sync", () => {
+    syncShaders(true);
+  });
+  host.addEventListener("paint", () => {
+    scheduleShaderSync();
+  });
 
   const toolRoot = document.createElement("div");
   toolRoot.style.cssText =
@@ -3735,6 +4012,7 @@ async function init() {
     bridge?.send("ombrique:ready", true);
   });
 
+  bridge?.onAgentPresence((payload) => applyPresence(payload));
   bridge?.onFiles((payload) => {
     applyTokensCss((payload as { files?: unknown } | null)?.files);
   });
@@ -3823,6 +4101,8 @@ async function init() {
       });
       return;
     }
+    await waitForShaderCanvases();
+    syncShaders(true);
     const result = await compositor.exportBoard(board.element, scale);
     if (!result) {
       bridge?.send("ombrique:exportResult", {

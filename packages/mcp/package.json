@@ -1,0 +1,28 @@
+{
+  "name": "@ombrique/mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./main": "./src/main.ts"
+  },
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "@ombrique/protocol": "workspace:*",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@ombrique/doc-service": "workspace:*",
+    "@ombrique/runtime": "workspace:*",
+    "@types/node": "^26.6.5",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.5"
+  }
+}

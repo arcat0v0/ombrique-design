@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:" />
+    <title>Ombrique shader capture probe</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #101014;
+      }
+      #cv {
+        position: fixed;
+        inset: 0;
+        width: 100vw;
+        height: 100vh;
+        display: block;
+      }
+      #hud {
+        position: fixed;
+        left: 16px;
+        top: 16px;
+        z-index: 10;
+        pointer-events: none;
+        font: 12px/1.5 ui-monospace, monospace;
+        color: #e8e8f0;
+        background: rgb(16 16 20 / 82%);
+        border: 1px solid rgb(255 255 255 / 16%);
+        border-radius: 8px;
+        padding: 10px 14px;
+        white-space: pre;
+      }
+      .board {
+        position: absolute;
+        box-sizing: border-box;
+        overflow: hidden;
+        background: #ffffff;
+        color: #17171c;
+        font-family: system-ui, sans-serif;
+      }
+      .board h2 {
+        margin: 0;
+        font-size: 22px;
+        font-weight: 700;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="cv" content="drawable"></canvas>
+    <div id="hud"><span id="hudText">starting…</span></div>
+    <script src="shader-probe.js"></script>
+  </body>
+</html>

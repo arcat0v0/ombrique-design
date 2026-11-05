@@ -12,7 +12,16 @@ export type {
   StylesIndex,
 } from "./build-index.js";
 export { parseDesignFile } from "./parse-design-file.js";
-export { parseStylesheet, parseTokenTable } from "./parse-stylesheet.js";
+export {
+  DEFAULT_TOKEN_AXIS,
+  DEFAULT_TOKEN_VALUE,
+  TOKEN_CELL_PREFIX,
+  decodeTokenCellRef,
+  parseStylesheet,
+  parseTokenTable,
+  resolveTokenValue,
+  selectorKey,
+} from "./parse-stylesheet.js";
 export { planPatch } from "./plan-patch.js";
 export type {
   AttrValue,
@@ -27,8 +36,13 @@ export type {
   StyleProp,
   StylesheetDecl,
   StylesheetRule,
+  TokenAxis,
+  TokenAxisSelector,
+  TokenCell,
+  TokenCellTarget,
   TokenDefinition,
   TokenMode,
+  TokenRule,
   TokenTable,
   TextChild,
   TextEdit,

@@ -6,7 +6,12 @@ import type {
   VariantAxis,
 } from "../../protocol/src/index.js";
 import { tokenModeNameSchema } from "../../protocol/src/index.js";
-import { parseStylesheet, parseTokenTable } from "./parse-stylesheet.js";
+import {
+  decodeTokenCellRef,
+  parseStylesheet,
+  parseTokenTable,
+  selectorKey,
+} from "./parse-stylesheet.js";
 import { applyEdits } from "./apply-edits.js";
 import type { DesignIndex } from "./build-index.js";
 import { parseDesignFile } from "./parse-design-file.js";
@@ -106,6 +111,7 @@ function genSpec(spec: NodeSpec): string {
     return `<${spec.componentName}${propStr} />`;
   }
   const nameAttr = `data-name=${JSON.stringify(spec.name)}`;
+  const geomAttrs = `x={${spec.x}} y={${spec.y}} width={${spec.width}} height={${spec.height}}`;
   if (spec.kind === "image") {
     const style = [
       `position: "absolute"`,
@@ -119,11 +125,16 @@ function genSpec(spec: NodeSpec): string {
       spec.radius !== undefined ? ` radius={${spec.radius}}` : "";
     return `<Image ${nameAttr} ${styleAttr} src=${JSON.stringify(spec.src)}${radiusAttr} />`;
   }
+  if (spec.kind === "shader") {
+    const timeAttr = spec.time !== undefined ? ` time={${spec.time}}` : "";
+    const radiusAttr =
+      spec.radius !== undefined ? ` radius={${spec.radius}}` : "";
+    return `<Shader ${nameAttr} ${geomAttrs} src=${JSON.stringify(spec.src)}${timeAttr}${radiusAttr} />`;
+  }
   const fillAttr =
     spec.fill !== undefined
       ? ` fill=${JSON.stringify(spec.fill)}`
       : ` fill="#d9d9d9"`;
-  const geomAttrs = `x={${spec.x}} y={${spec.y}} width={${spec.width}} height={${spec.height}}`;
   if (spec.kind === "path") {
     const dAttr = ` d=${JSON.stringify(spec.d)}`;
     const strokeAttr =
@@ -133,6 +144,17 @@ function genSpec(spec: NodeSpec): string {
         ? ` strokeWidth={${spec.strokeWidth}}`
         : "";
     return `<Path ${nameAttr} ${geomAttrs}${dAttr}${fillAttr}${strokeAttr}${strokeWidthAttr} />`;
+  }
+  if (spec.kind === "icon") {
+    const strokeWidthAttr =
+      spec.strokeWidth !== undefined
+        ? ` strokeWidth={${spec.strokeWidth}}`
+        : "";
+    const iconFillAttr =
+      spec.fill !== undefined ? ` fill=${JSON.stringify(spec.fill)}` : "";
+    const opacityAttr =
+      spec.opacity !== undefined ? ` opacity={${spec.opacity}}` : "";
+    return `<Icon ${nameAttr} ${geomAttrs} iconSet=${JSON.stringify(spec.iconSet)} iconName=${JSON.stringify(spec.iconName)} iconKind=${JSON.stringify(spec.iconKind)}${strokeWidthAttr}${iconFillAttr}${opacityAttr} />`;
   }
   if (spec.kind === "frame")
     return `<Frame ${nameAttr} ${geomAttrs}${fillAttr} />`;
@@ -818,6 +840,8 @@ class Planner {
       ellipse: "Ellipse",
       star: "Star",
       path: "Path",
+      icon: "Icon",
+      shader: "Shader",
       text: "Text",
       image: "Image",
     };
@@ -1255,13 +1279,39 @@ class Planner {
   setTokenValue(name: string, value: string, modeName?: string): TextEdit[] {
     const prop = this.normalizeTokenName(name);
     const table = this.tokenTable();
-    const mode =
-      modeName === undefined
-        ? table.modes.find((item) => item.isDefault)
-        : table.modes.find((item) => item.name === modeName);
-    if (!mode) throw new Error(`Unknown token mode: ${modeName}`);
-    for (const rule of [...mode.rules].reverse()) {
-      const decl = [...rule.decls].reverse().find((item) => item.prop === prop);
+    const target = decodeTokenCellRef(modeName, table);
+    if (target.mode) {
+      for (const rule of [...target.mode.rules].reverse()) {
+        const decl = [...rule.decls]
+          .reverse()
+          .find((item) => item.prop === prop);
+        if (decl)
+          return [
+            {
+              file: "tokens.css",
+              start: decl.valueSpan.start,
+              end: decl.valueSpan.end,
+              text: value,
+            },
+          ];
+      }
+      const rule = target.mode.rules.at(-1);
+      if (rule) return this.insertToken(rule, prop, value);
+      return this.createToken(name, value);
+    }
+    const rules =
+      target.kind === "default"
+        ? table.rules.filter((rule) => rule.selectors.length === 0)
+        : table.rules.filter(
+            (rule) =>
+              selectorKey(rule.selectors) === selectorKey(target.selectors),
+          );
+    const rule = rules.at(-1);
+    if (!rule) throw new Error(`Unknown token cell: ${modeName}`);
+    for (const candidate of [...rules].reverse()) {
+      const decl = [...candidate.rule.decls]
+        .reverse()
+        .find((item) => item.prop === prop);
       if (decl)
         return [
           {
@@ -1272,9 +1322,7 @@ class Planner {
           },
         ];
     }
-    const rule = mode.rules.at(-1);
-    if (rule) return this.insertToken(rule, prop, value);
-    return this.createToken(name, value);
+    return this.insertToken(rule.rule, prop, value);
   }
 
   createToken(name: string, value: string): TextEdit[] {
@@ -1310,7 +1358,7 @@ class Planner {
     for (const [file] of this.texts) {
       if (!file.endsWith(".tsx")) continue;
       for (const element of this.parsedOf(file).elements) {
-        const mode = element.attrs.mode;
+        const mode = element.attrs["data-mode"];
         if (element.tag === "Frame" && mode?.value === name) {
           if (value === null) {
             const code = this.textOf(file);
@@ -1328,6 +1376,31 @@ class Planner {
           }
         }
       }
+    }
+    return edits;
+  }
+
+  private modeSelectorEdits(rule: StylesheetRule, newName: string): TextEdit[] {
+    const re = /\[data-mode\s*=\s*(?:"([^"\\]+)"|'([^'\\]+)'|([\w-]+))\s*\]/g;
+    const edits: TextEdit[] = [];
+    for (const match of rule.selector.matchAll(re)) {
+      const oldName = match[1] ?? match[2] ?? match[3] ?? "";
+      const equals = match[0].indexOf("=");
+      const rawValue = match[0].slice(equals + 1).trimStart();
+      const valueOffset =
+        match[0].length - match[0].slice(equals + 1).trimStart().length;
+      const quoted = rawValue.startsWith('"') || rawValue.startsWith("'");
+      const start =
+        rule.selectorSpan.start +
+        (match.index ?? 0) +
+        valueOffset +
+        (quoted ? 1 : 0);
+      edits.push({
+        file: "tokens.css",
+        start,
+        end: start + oldName.length,
+        text: quoted ? newName : JSON.stringify(newName),
+      });
     }
     return edits;
   }
@@ -1352,39 +1425,23 @@ class Planner {
           text: `\n:root, [data-mode="${newName}"] {\n}\n`,
         },
       ];
+    const selectorEdits = new Map<string, TextEdit>();
     for (const rule of mode.rules) {
-      const match =
-        /\[data-mode\s*=\s*(?:"([^"\\]+)"|'([^'\\]+)'|([\w-]+))\s*\]/.exec(
-          rule.selector,
-        );
-      if (match) {
-        const oldName = match[1] ?? match[2] ?? match[3] ?? "";
-        const equals = match[0].indexOf("=");
-        const rawValue = match[0].slice(equals + 1).trimStart();
-        const valueOffset =
-          match[0].length - match[0].slice(equals + 1).trimStart().length;
-        const quoted = rawValue.startsWith('"') || rawValue.startsWith("'");
-        const start =
-          rule.selectorSpan.start +
-          match.index +
-          valueOffset +
-          (quoted ? 1 : 0);
-        edits.push({
-          file: "tokens.css",
-          start,
-          end: start + oldName.length,
-          text: quoted ? newName : JSON.stringify(newName),
-        });
-      } else {
-        edits.push({
+      const matches = this.modeSelectorEdits(rule, newName);
+      if (matches.length === 0) {
+        selectorEdits.set(`${rule.selectorSpan.end}:alias`, {
           file: "tokens.css",
           start: rule.selectorSpan.end,
           end: rule.selectorSpan.end,
           text: `, [data-mode="${newName}"]`,
         });
+        continue;
+      }
+      for (const edit of matches) {
+        selectorEdits.set(`${edit.start}:${edit.end}`, edit);
       }
     }
-    return edits;
+    return [...edits, ...selectorEdits.values()];
   }
 
   deleteTokenMode(name: string): TextEdit[] {
@@ -1436,6 +1493,7 @@ class Planner {
       "Group",
       "Image",
       "Path",
+      "Icon",
     ];
     const needed = primitives.filter((p) => {
       const reTag = new RegExp(`<${p}\\b`);

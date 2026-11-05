@@ -3,6 +3,9 @@ packages:
   - packages/*
   - prototype
 
+allowBuilds:
+  esbuild: true
+
 minimumReleaseAgeExclude:
   - electron
   - electron-vite

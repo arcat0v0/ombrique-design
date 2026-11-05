@@ -65,7 +65,11 @@ async function handle(message: ShellToDoc) {
 
   if (message.kind === "applyCommands") {
     const commands: EditCommand[] = message.commands;
-    const transaction = service.apply(commands, message.baseVersions);
+    const transaction = service.apply(
+      commands,
+      message.baseVersions,
+      message.actor,
+    );
     send({ type: "files", ...fileSnapshot(service) });
     return transaction;
   }
@@ -266,6 +270,24 @@ port.on("message", async (event) => {
         versions[file] = state.version;
     }
     send({ type: "versionsResult", id: data.id, versions });
+    return;
+  }
+  if (data.type === "history") {
+    try {
+      if (!service) throw new Error("no project open");
+      const entries = service.historyEntries().map((entry) => ({
+        id: entry.id,
+        actor: entry.actor,
+        stale: entry.stale,
+        createdAt: entry.createdAt,
+        files: [...entry.files],
+        before: Object.fromEntries(entry.before),
+        after: Object.fromEntries(entry.after),
+      }));
+      send({ type: "historyResult", id: data.id, entries });
+    } catch (error) {
+      send({ type: "historyResult", id: data.id, error: String(error) });
+    }
     return;
   }
   if (data.type === "tree") {

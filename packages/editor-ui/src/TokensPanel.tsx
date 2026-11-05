@@ -62,13 +62,24 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import type { TokenItem, TokenModeItem } from "./types";
+import type { TokenAxisSelector, TokenItem, TokenModeItem } from "./types";
+import {
+  DEFAULT_TOKEN_AXIS,
+  DEFAULT_TOKEN_VALUE,
+  TOKEN_CELL_PREFIX,
+} from "./types";
 
 export interface TokensPanelProps {
   tokens?: TokenItem[];
   modes?: TokenModeItem[];
   onRefreshToken?: () => void;
-  onSetToken?: (name: string, value: string, mode?: string) => void;
+  onSetToken?: (
+    name: string,
+    value: string,
+    axis?: string,
+    axisValue?: string,
+    selectors?: TokenAxisSelector[],
+  ) => void;
   onCreateToken?: (name: string, value: string) => void;
   onSelectToken?: (token: TokenItem) => void;
   onAddMode?: (name: string) => void;
@@ -77,6 +88,16 @@ export interface TokensPanelProps {
 }
 
 const LEGACY_MODES: TokenModeItem[] = [{ name: "default", isDefault: true }];
+
+interface TokenColumn {
+  key: string;
+  axis: string;
+  axisValue: string;
+  label: string;
+  isDefault: boolean;
+  selectors: TokenAxisSelector[];
+  mode?: TokenModeItem;
+}
 
 function isColorValue(val: string): boolean {
   const trimmed = val.trim().toLowerCase();
@@ -103,15 +124,138 @@ function validateModeName(
   return null;
 }
 
+function selectorKey(selectors: TokenAxisSelector[]): string {
+  return selectors
+    .map((selector) => `${selector.axis}\u0000${selector.value}`)
+    .sort()
+    .join("\u0001");
+}
+
+function escapeCellPart(part: string): string {
+  let out = "";
+  for (const char of part) {
+    if (/[a-zA-Z0-9]/.test(char)) {
+      out += char;
+    } else {
+      out += `-${(char.codePointAt(0) ?? 0).toString(16)}-`;
+    }
+  }
+  return out;
+}
+
+export function encodeTokenCellRef(selectors: TokenAxisSelector[]): string {
+  if (selectors.length === 0) return `${TOKEN_CELL_PREFIX} root`;
+  return [
+    TOKEN_CELL_PREFIX,
+    ...selectors.map(
+      (selector) =>
+        `${escapeCellPart(selector.axis)}---${escapeCellPart(selector.value)}`,
+    ),
+  ].join(" ");
+}
+
 function explicitValue(
   token: TokenItem,
-  mode: TokenModeItem,
+  column: TokenColumn,
   legacy: boolean,
 ): string | undefined {
   if (legacy) return token.value;
+  if (token.cells) {
+    const cells = token.cells.filter(
+      (cell) =>
+        cell.isDefault === column.isDefault &&
+        selectorKey(cell.selectors) === selectorKey(column.selectors),
+    );
+    return cells.at(-1)?.value;
+  }
+  if (column.isDefault) return token.value;
   return (
-    token.values?.[mode.name] ?? (mode.isDefault ? token.value : undefined)
+    token.values?.[column.axisValue] ??
+    (column.mode?.isDefault ? token.value : undefined)
   );
+}
+
+function buildColumnsFromCells(
+  tokens: TokenItem[],
+  modes?: TokenModeItem[],
+): TokenColumn[] {
+  const columns = new Map<string, TokenColumn>();
+  const defaultMode = modes?.find((item) => item.isDefault);
+  columns.set("default", {
+    key: "default",
+    axis: DEFAULT_TOKEN_AXIS,
+    axisValue: DEFAULT_TOKEN_VALUE,
+    label: DEFAULT_TOKEN_VALUE,
+    isDefault: true,
+    selectors: [],
+    mode: defaultMode,
+  });
+  for (const token of tokens) {
+    for (const cell of token.cells ?? []) {
+      if (cell.isDefault && cell.selectors.length === 0) continue;
+      const sorted = [...cell.selectors].sort((a, b) =>
+        `${a.axis}\u0000${a.value}`.localeCompare(`${b.axis}\u0000${b.value}`),
+      );
+      const axis = sorted.map((selector) => selector.axis).join("+");
+      const axisValue = sorted.map((selector) => selector.value).join("+");
+      const key = `${selectorKey(sorted)}:${axis}:${axisValue}`;
+      if (columns.has(key)) continue;
+      const mode =
+        sorted.length === 1 && sorted[0]?.axis === "mode"
+          ? modes?.find((item) => item.name === sorted[0]?.value)
+          : undefined;
+      columns.set(key, {
+        key,
+        axis,
+        axisValue,
+        label: axisValue,
+        isDefault: false,
+        selectors: sorted,
+        mode,
+      });
+    }
+  }
+  if (modes) {
+    for (const mode of modes) {
+      if (mode.isDefault) continue;
+      const selectors = [{ axis: "mode", value: mode.name }];
+      const key = `${selectorKey(selectors)}:mode:${mode.name}`;
+      if (columns.has(key)) continue;
+      columns.set(key, {
+        key,
+        axis: "mode",
+        axisValue: mode.name,
+        label: mode.name,
+        isDefault: false,
+        selectors,
+        mode,
+      });
+    }
+  }
+  const result = [...columns.values()];
+  result.sort((a, b) => {
+    const rankA = a.isDefault ? 0 : a.selectors.length;
+    const rankB = b.isDefault ? 0 : b.selectors.length;
+    return (
+      rankA - rankB ||
+      a.axis.localeCompare(b.axis) ||
+      a.axisValue.localeCompare(b.axisValue)
+    );
+  });
+  return result;
+}
+
+function buildColumnsFromModes(modeItems: TokenModeItem[]): TokenColumn[] {
+  const columns = modeItems.map((mode) => ({
+    key: `mode:${mode.name}`,
+    axis: "mode",
+    axisValue: mode.name,
+    label: mode.name,
+    isDefault: mode.isDefault,
+    selectors: mode.isDefault ? [] : [{ axis: "mode", value: mode.name }],
+    mode,
+  }));
+  return columns;
 }
 
 export function TokensPanel({
@@ -125,10 +269,19 @@ export function TokensPanel({
   onRenameMode,
   onDeleteMode,
 }: TokensPanelProps) {
-  const columns = modes && modes.length > 0 ? modes : LEGACY_MODES;
-  const legacy = columns === LEGACY_MODES;
-  const defaultMode = columns.find((m) => m.isDefault) ?? columns[0];
-  const defaultModeName = defaultMode?.name ?? "default";
+  const modeItems = modes && modes.length > 0 ? modes : LEGACY_MODES;
+  const hasCells = tokens.some((token) => (token.cells?.length ?? 0) > 0);
+  const legacy = !hasCells && (!modes || modes.length === 0);
+  const tokenColumns = useMemo(
+    () =>
+      hasCells
+        ? buildColumnsFromCells(tokens, modes)
+        : buildColumnsFromModes(modeItems),
+    [tokens, modes, modeItems, hasCells],
+  );
+  const defaultColumn =
+    tokenColumns.find((column) => column.isDefault) ?? tokenColumns[0];
+  const defaultColumnLabel = defaultColumn?.label ?? "default";
 
   const [search, setSearch] = useState("");
   const [copiedName, setCopiedName] = useState<string | null>(null);
@@ -153,17 +306,18 @@ export function TokensPanel({
         Object.values(t.values ?? {}).some((v) =>
           v.toLowerCase().includes(q),
         ) ||
+        (t.cells ?? []).some((cell) => cell.value.toLowerCase().includes(q)) ||
         t.category?.toLowerCase().includes(q),
     );
   }, [tokens, search]);
 
   const addModeError = newModeName.trim()
-    ? validateModeName(newModeName, columns)
+    ? validateModeName(newModeName, modeItems)
     : null;
   const renameError =
     renamingMode === null
       ? null
-      : validateModeName(renameValue, columns, renamingMode);
+      : validateModeName(renameValue, modeItems, renamingMode);
   const renameUnchanged = renameValue.trim() === renamingMode;
 
   const handleCopy = (token: TokenItem) => {
@@ -196,7 +350,7 @@ export function TokensPanel({
 
   const handleAddModeSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if (!onAddMode || validateModeName(newModeName, columns)) return;
+    if (!onAddMode || validateModeName(newModeName, modeItems)) return;
     onAddMode(newModeName.trim());
     onRefreshToken?.();
     setNewModeName("");
@@ -224,12 +378,18 @@ export function TokensPanel({
     setDeletingMode(null);
   };
 
-  const commitCell = (token: TokenItem, mode: TokenModeItem, val: string) => {
+  const commitCell = (token: TokenItem, column: TokenColumn, val: string) => {
     if (!onSetToken) return;
     if (legacy) {
       onSetToken(token.name, val);
     } else {
-      onSetToken(token.name, val, mode.name);
+      onSetToken(
+        token.name,
+        val,
+        column.axis,
+        column.axisValue,
+        column.selectors,
+      );
     }
     onRefreshToken?.();
   };
@@ -468,71 +628,80 @@ export function TokensPanel({
                   >
                     变量
                   </th>
-                  {columns.map((mode) => (
-                    <th
-                      key={mode.name}
-                      scope="col"
-                      className="h-7 min-w-24 border-b border-border px-1 text-left text-[10px] font-medium text-muted-foreground"
-                      data-mode={mode.name}
-                    >
-                      <div className="flex items-center gap-1">
-                        <span className="truncate" title={mode.name}>
-                          {mode.name}
-                        </span>
-                        {mode.isDefault && (
-                          <Badge
-                            variant="secondary"
-                            className="h-4 px-1 text-[9px]"
-                          >
-                            默认
-                          </Badge>
-                        )}
-                        {!legacy && (
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon-xs"
-                                className="ml-auto size-5 text-muted-foreground"
-                                aria-label={`模式 ${mode.name} 选项`}
-                              >
-                                <MoreHorizontalIcon />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-32">
-                              <DropdownMenuGroup>
-                                <DropdownMenuItem
-                                  disabled={!onRenameMode}
-                                  onSelect={() => startRename(mode)}
+                  {tokenColumns.map((column) => {
+                    const modeItem = column.mode;
+                    return (
+                      <th
+                        key={column.key}
+                        scope="col"
+                        className="h-7 min-w-24 border-b border-border px-1 text-left text-[10px] font-medium text-muted-foreground"
+                        data-axis={column.axis}
+                        data-axis-value={column.axisValue}
+                      >
+                        <div className="flex items-center gap-1">
+                          <div className="flex min-w-0 flex-col">
+                            <span className="text-[9px] text-muted-foreground/70">
+                              {column.axis}
+                            </span>
+                            <span className="truncate" title={column.label}>
+                              {column.label}
+                            </span>
+                          </div>
+                          {column.isDefault && (
+                            <Badge
+                              variant="secondary"
+                              className="h-4 px-1 text-[9px]"
+                            >
+                              默认
+                            </Badge>
+                          )}
+                          {!legacy && modeItem && (
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon-xs"
+                                  className="ml-auto size-5 text-muted-foreground"
+                                  aria-label={`轴 ${column.axis} 值 ${column.axisValue} 选项`}
                                 >
-                                  <PencilIcon data-icon="inline-start" />
-                                  <span>重命名</span>
-                                </DropdownMenuItem>
-                              </DropdownMenuGroup>
-                              {!mode.isDefault && (
-                                <>
-                                  <DropdownMenuSeparator />
-                                  <DropdownMenuGroup>
-                                    <DropdownMenuItem
-                                      variant="destructive"
-                                      disabled={!onDeleteMode}
-                                      onSelect={() =>
-                                        setDeletingMode(mode.name)
-                                      }
-                                    >
-                                      <Trash2Icon data-icon="inline-start" />
-                                      <span>删除</span>
-                                    </DropdownMenuItem>
-                                  </DropdownMenuGroup>
-                                </>
-                              )}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        )}
-                      </div>
-                    </th>
-                  ))}
+                                  <MoreHorizontalIcon />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-32">
+                                <DropdownMenuGroup>
+                                  <DropdownMenuItem
+                                    disabled={!onRenameMode}
+                                    onSelect={() => startRename(modeItem)}
+                                  >
+                                    <PencilIcon data-icon="inline-start" />
+                                    <span>重命名</span>
+                                  </DropdownMenuItem>
+                                </DropdownMenuGroup>
+                                {!modeItem.isDefault && (
+                                  <>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuGroup>
+                                      <DropdownMenuItem
+                                        variant="destructive"
+                                        disabled={!onDeleteMode}
+                                        onSelect={() =>
+                                          setDeletingMode(modeItem.name)
+                                        }
+                                      >
+                                        <Trash2Icon data-icon="inline-start" />
+                                        <span>删除</span>
+                                      </DropdownMenuItem>
+                                    </DropdownMenuGroup>
+                                  </>
+                                )}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          )}
+                        </div>
+                      </th>
+                    );
+                  })}
                   <th scope="col" className="w-6 border-b border-border">
                     <span className="sr-only">操作</span>
                   </th>
@@ -542,7 +711,7 @@ export function TokensPanel({
                 {filteredTokens.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={columns.length + 2}
+                      colSpan={tokenColumns.length + 2}
                       className="p-4 text-center text-xs text-muted-foreground"
                     >
                       {search
@@ -585,23 +754,24 @@ export function TokensPanel({
                           </span>
                         )}
                       </th>
-                      {columns.map((mode) => {
-                        const explicit = explicitValue(token, mode, legacy);
+                      {tokenColumns.map((column) => {
+                        const explicit = explicitValue(token, column, legacy);
+                        const columnLabel = `${column.axis} / ${column.axisValue}`;
                         return (
                           <td
-                            key={mode.name}
+                            key={column.key}
                             className="border-b border-border/50 px-1 py-1"
                           >
                             <TokenValueCell
-                              key={`${mode.name}:${explicit ?? ""}`}
+                              key={`${column.key}:${explicit ?? ""}`}
                               tokenName={token.name}
-                              modeName={mode.name}
+                              columnLabel={columnLabel}
                               legacy={legacy}
                               explicit={explicit}
                               fallback={token.value}
-                              defaultModeName={defaultModeName}
+                              defaultColumnLabel={defaultColumnLabel}
                               canEdit={Boolean(onSetToken)}
-                              onCommit={(val) => commitCell(token, mode, val)}
+                              onCommit={(val) => commitCell(token, column, val)}
                             />
                           </td>
                         );
@@ -722,22 +892,22 @@ export function TokensPanel({
 
 interface TokenValueCellProps {
   tokenName: string;
-  modeName: string;
+  columnLabel: string;
   legacy: boolean;
   explicit: string | undefined;
   fallback: string;
-  defaultModeName: string;
+  defaultColumnLabel: string;
   canEdit: boolean;
   onCommit: (val: string) => void;
 }
 
 function TokenValueCell({
   tokenName,
-  modeName,
+  columnLabel,
   legacy,
   explicit,
   fallback,
-  defaultModeName,
+  defaultColumnLabel,
   canEdit,
   onCommit,
 }: TokenValueCellProps) {
@@ -768,7 +938,7 @@ function TokenValueCell({
     }
   };
 
-  const inheritedText = `继承自默认模式 ${defaultModeName}：${fallback}`;
+  const inheritedText = `继承自默认轴值 ${defaultColumnLabel}：${fallback}`;
   const title = !canEdit
     ? "核心尚未接线 setToken"
     : inherited
@@ -799,7 +969,7 @@ function TokenValueCell({
         aria-label={
           legacy
             ? `变量 ${tokenName} 的值`
-            : `变量 ${tokenName} 在模式 ${modeName} 的值`
+            : `变量 ${tokenName} 在轴 ${columnLabel} 的值`
         }
         aria-describedby={inherited ? descriptionId : undefined}
         data-inherited={inherited ? "true" : undefined}

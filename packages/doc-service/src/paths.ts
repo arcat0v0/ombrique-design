@@ -37,6 +37,8 @@ export function resolveInside(root: string, relativePath: string): string {
   return absolute;
 }
 
+export const ICON_DIR = "icons";
+
 export const DESIGN_EXTENSIONS = new Set([
   ".tsx",
   ".scss",
@@ -47,12 +49,13 @@ export const DESIGN_EXTENSIONS = new Set([
 
 export function listDesignFiles(root: string): string[] {
   const out: string[] = [];
-  const walk = (dir: string) => {
+  const walk = (dir: string, isRoot: boolean) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
+      if (isRoot && entry.name === ICON_DIR) continue;
       const absolute = join(dir, entry.name);
       if (entry.isDirectory()) {
-        walk(absolute);
+        walk(absolute, false);
         continue;
       }
       if (!entry.isFile()) continue;
@@ -61,7 +64,7 @@ export function listDesignFiles(root: string): string[] {
         out.push(toPosix(relative(root, absolute)));
     }
   };
-  walk(root);
+  walk(root, true);
   return out.sort();
 }
 

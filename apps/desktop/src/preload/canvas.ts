@@ -29,6 +29,9 @@ contextBridge.exposeInMainWorld("ombriqueCanvas", {
   onManifest: (cb: (payload: unknown) => void) => {
     ipcRenderer.on("ombrique:manifest", (_event, payload) => cb(payload));
   },
+  onAgentPresence: (cb: (payload: unknown) => void) => {
+    ipcRenderer.on("ombrique:agentPresence", (_event, payload) => cb(payload));
+  },
   onViewCommand: (cb: (payload: unknown) => void) => {
     for (const channel of [
       "ombrique:zoom",

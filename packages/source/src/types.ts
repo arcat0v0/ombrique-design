@@ -85,23 +85,65 @@ export interface ParsedStylesheet {
   rules: StylesheetRule[];
 }
 
-export interface TokenMode {
-  name: string;
+export interface TokenAxisSelector {
+  axis: string;
+  value: string;
+}
+
+export interface TokenRule {
+  order: number;
+  specificity: number;
   isDefault: boolean;
-  rules: StylesheetRule[];
+  selectors: TokenAxisSelector[];
+  rule: StylesheetRule;
+}
+
+export interface TokenAxis {
+  name: string;
+  values: string[];
+  isDefault?: boolean;
+}
+
+export interface TokenCell {
+  value: string;
+  ruleIndex: number;
+  order: number;
+  specificity: number;
+  isDefault: boolean;
+  selectors: TokenAxisSelector[];
+  propSpan: Span;
+  valueSpan: Span;
+  file: string;
 }
 
 export interface TokenDefinition {
   name: string;
   value: string;
   values: Record<string, string>;
+  cells: TokenCell[];
+  axisValues: Record<string, Record<string, TokenCell[]>>;
   file: string;
   span: Span;
 }
 
+export interface TokenMode {
+  name: string;
+  isDefault: boolean;
+  axis: string;
+  rules: StylesheetRule[];
+}
+
 export interface TokenTable {
   modes: TokenMode[];
+  axes: TokenAxis[];
+  rules: TokenRule[];
   tokens: TokenDefinition[];
+}
+
+export interface TokenCellTarget {
+  kind: "default" | "mode" | "cell";
+  selectors: TokenAxisSelector[];
+  mode?: TokenMode;
 }
 
 export interface TextEdit {

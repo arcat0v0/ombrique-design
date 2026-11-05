@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld("ombriqueShell", {
     ipcRenderer.invoke("ombrique:resolveNode", file, path),
   tree: (file: string) => ipcRenderer.invoke("ombrique:tree", file),
   versions: () => ipcRenderer.invoke("ombrique:versions"),
+  history: () => ipcRenderer.invoke("ombrique:history"),
   listTokens: () => ipcRenderer.invoke("ombrique:listTokens"),
   listTokenModes: () => ipcRenderer.invoke("ombrique:listTokenModes"),
   listStyles: () => ipcRenderer.invoke("ombrique:listStyles"),

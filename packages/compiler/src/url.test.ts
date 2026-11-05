@@ -28,4 +28,8 @@ describe("mimeFor", () => {
     expect(mimeFor("fonts/inter.woff2")).toBe("font/woff2");
     expect(mimeFor("bin")).toBe("application/octet-stream");
   });
+
+  it("serves glsl assets as plain text", () => {
+    expect(mimeFor("shaders/mesh-gradient.glsl")).toBe("text/plain");
+  });
 });

@@ -78,3 +78,53 @@ describe("bundle and extract", () => {
     rmSync(archivePath, { force: true });
   });
 });
+
+describe("bundle: project icon sets", () => {
+  it("packs and extracts the icons directory", async () => {
+    const srcDir = mkdtempSync(join(tmpdir(), "ombrique-icon-src-"));
+    const destDir = mkdtempSync(join(tmpdir(), "ombrique-icon-dest-"));
+    const archivePath = join(tmpdir(), `icons-${Date.now()}.ombrique`);
+    mkdirSync(join(srcDir, "icons"), { recursive: true });
+    writeFileSync(join(srcDir, "icons/acme.json"), '{"prefix":"acme"}', "utf8");
+    writeFileSync(join(srcDir, "ombrique.json"), '{"pages":[]}', "utf8");
+
+    try {
+      await createBundle(srcDir, archivePath);
+      await extractBundle(archivePath, destDir);
+      expect(readFileSync(join(destDir, "icons/acme.json"), "utf8")).toBe(
+        '{"prefix":"acme"}',
+      );
+    } finally {
+      rmSync(srcDir, { recursive: true, force: true });
+      rmSync(destDir, { recursive: true, force: true });
+      rmSync(archivePath, { force: true });
+    }
+  });
+});
+
+describe("bundle: shader assets", () => {
+  it("packs and extracts the shaders directory", async () => {
+    const srcDir = mkdtempSync(join(tmpdir(), "ombrique-shader-src-"));
+    const destDir = mkdtempSync(join(tmpdir(), "ombrique-shader-dest-"));
+    const archivePath = join(tmpdir(), `shaders-${Date.now()}.ombrique`);
+    mkdirSync(join(srcDir, "shaders"), { recursive: true });
+    writeFileSync(
+      join(srcDir, "shaders/mesh-gradient.glsl"),
+      "#version 300 es\n",
+      "utf8",
+    );
+    writeFileSync(join(srcDir, "ombrique.json"), '{"pages":[]}', "utf8");
+
+    try {
+      await createBundle(srcDir, archivePath);
+      await extractBundle(archivePath, destDir);
+      expect(
+        readFileSync(join(destDir, "shaders/mesh-gradient.glsl"), "utf8"),
+      ).toBe("#version 300 es\n");
+    } finally {
+      rmSync(srcDir, { recursive: true, force: true });
+      rmSync(destDir, { recursive: true, force: true });
+      rmSync(archivePath, { force: true });
+    }
+  });
+});

@@ -8,7 +8,8 @@
   },
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "gen:icons": "node scripts/gen-icons.ts"
   },
   "peerDependencies": {
     "react": "^19.0.0",
@@ -16,9 +17,11 @@
   },
   "devDependencies": {
     "@testing-library/react": "^16.3.2",
+    "@types/node": "^26.6.5",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "jsdom": "^27.2.0",
+    "lucide-static": "1.63.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "typescript": "^5.9.3",

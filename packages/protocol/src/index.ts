@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { exportNodeRequestSchema } from "./export";
 
 export const nodeRefSchema = z.object({
   file: z.string().min(1),
@@ -85,6 +86,36 @@ export const imageSpecSchema = z.object({
   radius: z.number().nonnegative().optional(),
 });
 export type ImageSpec = z.infer<typeof imageSpecSchema>;
+
+export const iconSpecSchema = z.object({
+  kind: z.literal("icon"),
+  name: z.string().min(1),
+  x: z.number(),
+  y: z.number(),
+  width: z.number().positive(),
+  height: z.number().positive(),
+  iconSet: z.string().min(1),
+  iconName: z.string().min(1),
+  iconKind: z.enum(["stroke", "fill"]),
+  strokeWidth: z.number().positive().optional(),
+  fill: z.string().optional(),
+  opacity: z.number().min(0).max(1).optional(),
+});
+export type IconSpec = z.infer<typeof iconSpecSchema>;
+
+export const shaderSpecSchema = z.object({
+  kind: z.literal("shader"),
+  name: z.string().min(1),
+  x: z.number(),
+  y: z.number(),
+  width: z.number().positive(),
+  height: z.number().positive(),
+  src: z.string().min(1),
+  time: z.number().optional(),
+  radius: z.number().nonnegative().optional(),
+});
+export type ShaderSpec = z.infer<typeof shaderSpecSchema>;
+
 export const componentSpecSchema = z.object({
   kind: z.literal("component"),
   componentName: z.string().min(1),
@@ -109,6 +140,8 @@ export const nodeSpecSchema = z.discriminatedUnion("kind", [
   pathSpecSchema,
   textSpecSchema,
   imageSpecSchema,
+  iconSpecSchema,
+  shaderSpecSchema,
   componentSpecSchema,
 ]);
 export type NodeSpec = z.infer<typeof nodeSpecSchema>;
@@ -268,6 +301,7 @@ export const shellToDocSchema = z.discriminatedUnion("kind", [
     kind: z.literal("applyCommands"),
     commands: z.array(editCommandSchema).min(1),
     baseVersions: z.array(z.string()),
+    actor: z.string().min(1).optional(),
   }),
   z.object({ kind: z.literal("undo") }),
   z.object({ kind: z.literal("redo") }),
@@ -291,7 +325,8 @@ export const appliedTransactionSchema = z.object({
   id: z.string().min(1),
   changedFiles: z.array(z.string()),
   versions: z.record(z.string(), z.string()),
-  origin: z.enum(["designer", "external"]),
+  origin: z.enum(["designer", "agent", "external"]),
+  actor: z.string().min(1).optional(),
 });
 export type AppliedTransaction = z.infer<typeof appliedTransactionSchema>;
 
@@ -324,6 +359,126 @@ export const docToShellSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 export type DocToShell = z.infer<typeof docToShellSchema>;
+
+export const agentSessionSchema = z.object({
+  id: z.string().min(1),
+  actor: z.string().min(1),
+  color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+  client: z.string().min(1).optional(),
+});
+export type AgentSession = z.infer<typeof agentSessionSchema>;
+
+export const agentPresenceTargetSchema = z.object({
+  file: z.string().min(1),
+  path: z.array(z.number().int().nonnegative()),
+});
+export type AgentPresenceTarget = z.infer<typeof agentPresenceTargetSchema>;
+
+export const AGENT_PALETTE = [
+  "#ff6b6b",
+  "#4ecdc4",
+  "#45b7d1",
+  "#f9ca24",
+  "#a29bfe",
+  "#ff9f43",
+] as const;
+
+export const historySnapshotEntrySchema = z.object({
+  id: z.string().min(1),
+  actor: z.string().min(1),
+  stale: z.boolean(),
+  createdAt: z.number(),
+  files: z.array(z.string()),
+  before: z.record(z.string(), z.string()),
+  after: z.record(z.string(), z.string()),
+});
+export type HistorySnapshotEntry = z.infer<typeof historySnapshotEntrySchema>;
+
+export const agentQuerySchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("resolve"),
+    file: z.string().min(1),
+    path: z.array(z.number().int().nonnegative()),
+  }),
+  z.object({ type: z.literal("tree"), file: z.string().min(1) }),
+  z.object({ type: z.literal("versions") }),
+  z.object({ type: z.literal("tokens") }),
+  z.object({ type: z.literal("styles") }),
+  z.object({
+    type: z.literal("select"),
+    targets: z.array(agentPresenceTargetSchema).min(1),
+  }),
+  z.object({
+    type: z.literal("screenshot"),
+    page: z.string().min(1).optional(),
+  }),
+  z.object({
+    type: z.literal("export"),
+    request: exportNodeRequestSchema,
+  }),
+]);
+export type AgentQuery = z.infer<typeof agentQuerySchema>;
+
+export const agentClientToHostSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("initialize"),
+    client: z.string().min(1).optional(),
+  }),
+  z.object({
+    kind: z.literal("shell"),
+    message: shellToDocSchema,
+  }),
+  z.object({
+    kind: z.literal("query"),
+    id: z.string().min(1),
+    request: agentQuerySchema,
+  }),
+  z.object({
+    kind: z.literal("activity"),
+    targets: z.array(agentPresenceTargetSchema),
+  }),
+]);
+export type AgentClientToHost = z.infer<typeof agentClientToHostSchema>;
+
+export const agentHostToClientSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("connected"),
+    session: agentSessionSchema,
+    generation: z.number().int().nonnegative(),
+    projectOpen: z.boolean(),
+  }),
+  z.object({
+    kind: z.literal("ready"),
+    session: agentSessionSchema,
+    generation: z.number().int().nonnegative(),
+  }),
+  z.object({
+    kind: z.literal("projectAvailable"),
+    root: z.string().min(1),
+    generation: z.number().int().nonnegative(),
+    initializeRequired: z.literal(true),
+  }),
+  z.object({
+    kind: z.literal("projectClosed"),
+    generation: z.number().int().nonnegative(),
+    reason: z.enum(["closed", "switch"]),
+  }),
+  z.object({
+    kind: z.literal("doc"),
+    message: docToShellSchema,
+  }),
+  z.object({
+    kind: z.literal("queryResult"),
+    id: z.string().min(1),
+    payload: z.record(z.string(), z.unknown()),
+  }),
+  z.object({
+    kind: z.literal("error"),
+    message: z.string().min(1),
+    id: z.string().min(1).optional(),
+  }),
+]);
+export type AgentHostToClient = z.infer<typeof agentHostToClientSchema>;
 
 export interface TokenItem {
   name: string;

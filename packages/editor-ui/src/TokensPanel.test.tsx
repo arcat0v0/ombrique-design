@@ -6,8 +6,14 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { TokensPanel } from "./TokensPanel";
-import type { TokenItem, TokenModeItem } from "./types";
+import { tokenModeNameSchema } from "@ombrique/protocol";
+import { TokensPanel, encodeTokenCellRef } from "./TokensPanel";
+import type {
+  TokenAxisSelector,
+  TokenCellItem,
+  TokenItem,
+  TokenModeItem,
+} from "./types";
 
 afterEach(cleanup);
 
@@ -37,8 +43,51 @@ const MODE_TOKENS: TokenItem[] = [
   },
 ];
 
-async function openModeMenu(modeName: string) {
-  fireEvent.pointerDown(screen.getByLabelText(`模式 ${modeName} 选项`), {
+function makeCell(
+  value: string,
+  selectors: TokenAxisSelector[],
+  order: number,
+  isDefault = false,
+): TokenCellItem {
+  return {
+    value,
+    selectors,
+    order,
+    ruleIndex: order,
+    specificity: selectors.length + (isDefault ? 1 : 0),
+    isDefault,
+  };
+}
+
+const MULTI_AXIS_TOKENS: TokenItem[] = [
+  {
+    name: "--bg",
+    value: "white",
+    cells: [
+      makeCell("white", [], 0, true),
+      makeCell("black", [{ axis: "mode", value: "Dark" }], 1),
+      makeCell(
+        "#111",
+        [
+          { axis: "mode", value: "Dark" },
+          { axis: "density", value: "condensed" },
+        ],
+        2,
+      ),
+    ],
+  },
+  {
+    name: "--gap",
+    value: "8px",
+    cells: [
+      makeCell("8px", [], 0, true),
+      makeCell("4px", [{ axis: "density", value: "condensed" }], 3),
+    ],
+  },
+];
+
+async function openModeMenu(axisValue: string) {
+  fireEvent.pointerDown(screen.getByLabelText(`轴 mode 值 ${axisValue} 选项`), {
     button: 0,
   });
   return screen.findByRole("menu");
@@ -104,7 +153,7 @@ describe("TokensPanel", () => {
     expect(onRefreshToken).toHaveBeenCalledTimes(1);
   });
 
-  it("renders multi-mode columns with explicit values and inherited fallback", () => {
+  it("renders axis columns with explicit values and inherited fallback", () => {
     const { getByRole, getByLabelText } = render(
       <TokensPanel tokens={MODE_TOKENS} modes={MODES} />,
     );
@@ -115,23 +164,23 @@ describe("TokensPanel", () => {
     expect(headers[2]?.textContent).toContain("Dark");
 
     const light = getByLabelText(
-      "变量 --color-primary 在模式 Light 的值",
+      "变量 --color-primary 在轴 mode / Light 的值",
     ) as HTMLInputElement;
     const dark = getByLabelText(
-      "变量 --color-primary 在模式 Dark 的值",
+      "变量 --color-primary 在轴 mode / Dark 的值",
     ) as HTMLInputElement;
     expect(light.value).toBe("#2f6bff");
     expect(dark.value).toBe("#9db8ff");
 
     const inheritedDark = getByLabelText(
-      "变量 --space-2 在模式 Dark 的值",
+      "变量 --space-2 在轴 mode / Dark 的值",
     ) as HTMLInputElement;
     expect(inheritedDark.value).toBe("");
     expect(inheritedDark.placeholder).toBe("8px");
     expect(inheritedDark.getAttribute("data-inherited")).toBe("true");
   });
 
-  it("edits values in mode columns and ignores untouched inherited cells", () => {
+  it("edits values in axis columns and ignores untouched inherited cells", () => {
     const onSetToken = vi.fn();
     const onRefreshToken = vi.fn();
     const { getByLabelText } = render(
@@ -143,13 +192,19 @@ describe("TokensPanel", () => {
       />,
     );
 
-    const untouched = getByLabelText("变量 --space-2 在模式 Dark 的值");
+    const untouched = getByLabelText("变量 --space-2 在轴 mode / Dark 的值");
     fireEvent.blur(untouched);
     expect(onSetToken).not.toHaveBeenCalled();
 
     fireEvent.change(untouched, { target: { value: "16px" } });
     fireEvent.keyDown(untouched, { key: "Enter" });
-    expect(onSetToken).toHaveBeenCalledWith("--space-2", "16px", "Dark");
+    expect(onSetToken).toHaveBeenCalledWith(
+      "--space-2",
+      "16px",
+      "mode",
+      "Dark",
+      [{ axis: "mode", value: "Dark" }],
+    );
     expect(onRefreshToken).toHaveBeenCalledTimes(1);
   });
 
@@ -253,5 +308,58 @@ describe("TokensPanel", () => {
 
     expect(onCreateToken).toHaveBeenCalledWith("--color-danger", "#ef4444");
     expect(onRefreshToken).toHaveBeenCalledTimes(1);
+  });
+
+  it("groups columns by axis and exposes axis values on headers", () => {
+    const { getByRole } = render(
+      <TokensPanel tokens={MULTI_AXIS_TOKENS} modes={MODES} />,
+    );
+    const headers = within(getByRole("table")).getAllByRole("columnheader");
+    expect(headers).toHaveLength(6);
+    expect(headers[1]?.getAttribute("data-axis")).toBe(":root");
+    expect(headers[1]?.getAttribute("data-axis-value")).toBe("default");
+    expect(headers[2]?.getAttribute("data-axis")).toBe("density");
+    expect(headers[2]?.getAttribute("data-axis-value")).toBe("condensed");
+    expect(headers[3]?.getAttribute("data-axis")).toBe("mode");
+    expect(headers[3]?.getAttribute("data-axis-value")).toBe("Dark");
+    expect(headers[4]?.getAttribute("data-axis")).toBe("density+mode");
+    expect(headers[4]?.getAttribute("data-axis-value")).toBe("condensed+Dark");
+    for (const header of headers.slice(1, 5)) {
+      expect(header?.getAttribute("data-mode")).toBeNull();
+    }
+  });
+
+  it("emits axis and axisValue when editing a cell", () => {
+    const onSetToken = vi.fn();
+    const { getByLabelText } = render(
+      <TokensPanel
+        tokens={MULTI_AXIS_TOKENS}
+        modes={MODES}
+        onSetToken={onSetToken}
+      />,
+    );
+    const input = getByLabelText("变量 --gap 在轴 density / condensed 的值");
+    fireEvent.change(input, { target: { value: "6px" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onSetToken).toHaveBeenCalledWith(
+      "--gap",
+      "6px",
+      "density",
+      "condensed",
+      [{ axis: "density", value: "condensed" }],
+    );
+  });
+
+  it("encodes cell references for shell actions", () => {
+    expect(encodeTokenCellRef([])).toBe("ombrique root");
+    expect(encodeTokenCellRef([{ axis: "mode", value: "dark" }])).toBe(
+      "ombrique mode---dark",
+    );
+    const encoded = encodeTokenCellRef([
+      { axis: "mode", value: "Night mode" },
+      { axis: "density", value: "condensed" },
+    ]);
+    expect(encoded).toBe("ombrique mode---Night-20-mode density---condensed");
+    expect(tokenModeNameSchema.safeParse(encoded).success).toBe(true);
   });
 });

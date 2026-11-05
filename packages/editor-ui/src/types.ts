@@ -6,6 +6,7 @@ import type {
   GitBranchList,
   GitCommit,
   GitStatus,
+  HistorySnapshotEntry,
   Manifest,
   RecentProject,
 } from "@ombrique/protocol";
@@ -52,10 +53,34 @@ export interface StyleRow {
   sourceId?: string;
 }
 
+export interface TokenAxisSelector {
+  axis: string;
+  value: string;
+}
+
+export interface TokenCellItem {
+  value: string;
+  order: number;
+  ruleIndex: number;
+  specificity: number;
+  isDefault: boolean;
+  selectors: TokenAxisSelector[];
+  propSpan?: { start: number; end: number };
+  valueSpan?: { start: number; end: number };
+  file?: string;
+}
+
+export interface TokenCellRef {
+  axis: string;
+  axisValue: string;
+  selectors: TokenAxisSelector[];
+}
+
 export interface TokenItem {
   name: string;
   value: string;
   values?: Record<string, string>;
+  cells?: TokenCellItem[];
   file?: string;
   category?: string;
   description?: string;
@@ -64,6 +89,10 @@ export interface TokenModeItem {
   name: string;
   isDefault: boolean;
 }
+
+export const DEFAULT_TOKEN_AXIS = ":root";
+export const DEFAULT_TOKEN_VALUE = "default";
+export const TOKEN_CELL_PREFIX = "ombrique";
 
 export interface ComponentItem {
   name: string;
@@ -138,6 +167,7 @@ export interface ShellView {
   history?: GitCommit[];
   branches?: GitBranchList | null;
   isHistoryPreview?: boolean;
+  editHistory?: HistorySnapshotEntry[];
   previewCommit?: GitCommit | null;
   comments?: CommentThread[];
   activeCommentThreadId?: string | null;
@@ -242,6 +272,8 @@ export interface ShellActions {
   createBranch?: (branchName: string) => Promise<boolean>;
   switchBranch?: (branchName: string) => Promise<boolean>;
   refreshBranches?: () => Promise<void>;
+  refreshEditHistory?: () => Promise<void>;
+  restoreEditHistory?: (id: string) => Promise<boolean>;
   createCommentThread?: (thread: {
     anchor: CommentAnchor;
     author: string;

@@ -8,13 +8,22 @@ export { AssetsPanel } from "./AssetsPanel";
 export type { AssetsPanelProps } from "./AssetsPanel";
 export { FloatingToolSwitcher } from "./FloatingToolSwitcher";
 export type { FloatingToolSwitcherProps } from "./FloatingToolSwitcher";
-export { TokensPanel } from "./TokensPanel";
+export { TokensPanel, encodeTokenCellRef } from "./TokensPanel";
 export type { TokensPanelProps } from "./TokensPanel";
 export { VersionHistoryPanel } from "./VersionHistoryPanel";
 export type { VersionHistoryPanelProps } from "./VersionHistoryPanel";
+export { TransactionHistoryPanel } from "./TransactionHistoryPanel";
+export type { TransactionHistoryPanelProps } from "./TransactionHistoryPanel";
 export { CommentsPanel } from "./CommentsPanel";
 export type { CommentsPanelProps } from "./CommentsPanel";
 export { parseStyleInput } from "./parseStyleInput";
+export {
+  buildRollbackFiles,
+  formatActorBadge,
+  formatEditHistoryTime,
+  summarizeEditHistoryEntry,
+} from "./transaction-history";
+export type { ActorBadge, EditHistorySummary } from "./transaction-history";
 export type {
   ComponentItem,
   CanvasTool,
@@ -26,6 +35,9 @@ export type {
   ShellView,
   StyleRow,
   StyleTarget,
+  TokenAxisSelector,
+  TokenCellItem,
+  TokenCellRef,
   TokenItem,
   TokenModeItem,
 } from "./types";
@@ -42,3 +54,8 @@ export type {
   ZoomAction,
   ZOrderAction,
 } from "./shortcuts";
+export {
+  DEFAULT_TOKEN_AXIS,
+  DEFAULT_TOKEN_VALUE,
+  TOKEN_CELL_PREFIX,
+} from "./types";

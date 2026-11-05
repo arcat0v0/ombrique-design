@@ -655,14 +655,15 @@ describe("PropertiesPanel", () => {
     expect(getByText("时长 (Duration ms)")).toBeDefined();
   });
 
-  it("dispatches Frame mode through onSetAttrs and clears it for inherit", async () => {
+  it("dispatches Frame data-mode through onSetAttrs and clears it for inherit", async () => {
     const onSetAttrs = vi.fn();
+    const onSetStyle = vi.fn();
     const selection = makeSelection({
       name: "Card",
       tag: "Frame",
+      attrs: [{ key: "data-mode", value: "dark" }],
       styles: [
         { key: "width", value: "300", source: "inline", readOnly: false },
-        { key: "mode", value: "dark", source: "inline", readOnly: false },
       ],
     });
     const tokenModes = [
@@ -674,7 +675,7 @@ describe("PropertiesPanel", () => {
       <PropertiesPanel
         selection={selection}
         tokenModes={tokenModes}
-        onSetStyle={() => {}}
+        onSetStyle={onSetStyle}
         onSetAttrs={onSetAttrs}
         onSetText={() => {}}
         onSetName={() => {}}
@@ -688,14 +689,15 @@ describe("PropertiesPanel", () => {
 
     fireEvent.pointerDown(trigger, { button: 0 });
     fireEvent.click(await findByTestId("mode-option-compact"));
-    expect(onSetAttrs).toHaveBeenCalledWith({ mode: "compact" });
+    expect(onSetAttrs).toHaveBeenCalledWith({ "data-mode": "compact" });
 
     fireEvent.pointerDown(getByTestId("mode-trigger"), { button: 0 });
     fireEvent.click(await findByTestId("mode-option-inherit"));
-    expect(onSetAttrs).toHaveBeenCalledWith({ mode: null });
+    expect(onSetAttrs).toHaveBeenCalledWith({ "data-mode": null });
 
     fireEvent.pointerDown(getByTestId("mode-trigger"), { button: 0 });
     fireEvent.click(await findByTestId("mode-option-default"));
-    expect(onSetAttrs).toHaveBeenCalledWith({ mode: "default" });
+    expect(onSetAttrs).toHaveBeenCalledWith({ "data-mode": "default" });
+    expect(onSetStyle).not.toHaveBeenCalled();
   });
 });

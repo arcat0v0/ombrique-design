@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  agentClientToHostSchema,
+  agentHostToClientSchema,
+  agentSessionSchema,
   appliedTransactionSchema,
   docToShellSchema,
   editCommandSchema,
+  historySnapshotEntrySchema,
   manifestSchema,
   shellToDocSchema,
 } from "./index";
@@ -116,6 +120,81 @@ describe("editCommandSchema", () => {
       ).toBe(false);
     }
   });
+
+  it("accepts an icon node spec with stroke or fill icon kind", () => {
+    const command = {
+      kind: "createNodes",
+      parent: null,
+      pageFile: "pages/home.tsx",
+      index: 0,
+      specs: [
+        {
+          kind: "icon",
+          name: "Arrow",
+          x: 0,
+          y: 0,
+          width: 24,
+          height: 24,
+          iconSet: "lucide",
+          iconName: "arrow-right",
+          iconKind: "stroke",
+          strokeWidth: 2,
+          fill: "none",
+          opacity: 0.8,
+        },
+      ],
+    };
+    expect(editCommandSchema.parse(command)).toEqual(command);
+    expect(
+      editCommandSchema.safeParse({
+        ...command,
+        specs: [{ ...command.specs[0], iconKind: "both" }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("accepts a static shader node spec", () => {
+    const command = {
+      kind: "createNodes",
+      parent: null,
+      pageFile: "pages/shader.tsx",
+      index: 0,
+      specs: [
+        {
+          kind: "shader",
+          name: "Mesh",
+          x: 64,
+          y: 176,
+          width: 720,
+          height: 420,
+          src: "shaders/mesh-gradient.glsl",
+          time: 0,
+          radius: 28,
+        },
+      ],
+    };
+    expect(editCommandSchema.parse(command)).toEqual(command);
+    const [spec] = command.specs;
+    if (!spec) throw new Error("missing spec");
+    expect(
+      editCommandSchema.safeParse({
+        ...command,
+        specs: [{ ...spec, src: "" }],
+      }).success,
+    ).toBe(false);
+    expect(
+      editCommandSchema.safeParse({
+        ...command,
+        specs: [{ ...spec, radius: -1 }],
+      }).success,
+    ).toBe(false);
+    expect(
+      editCommandSchema.safeParse({
+        ...command,
+        specs: [{ ...spec, kind: "shader-layer" }],
+      }).success,
+    ).toBe(false);
+  });
 });
 
 describe("manifestSchema", () => {
@@ -155,7 +234,176 @@ describe("ipc envelopes", () => {
     expect(docToShellSchema.parse(msg).kind).toBe("transactionApplied");
   });
 
+  it("accepts an optional actor on applyCommands", () => {
+    const message = {
+      kind: "applyCommands",
+      commands: [{ kind: "addPage", name: "Home" }],
+      baseVersions: [],
+    };
+    expect(shellToDocSchema.parse(message)).not.toHaveProperty("actor");
+    expect(
+      shellToDocSchema.parse({ ...message, actor: "agent-1" }),
+    ).toHaveProperty("actor", "agent-1");
+    expect(shellToDocSchema.safeParse({ ...message, actor: "" }).success).toBe(
+      false,
+    );
+  });
+
+  it("validates agent transactions with an actor", () => {
+    const transaction = {
+      id: "t2",
+      changedFiles: ["pages/home.tsx"],
+      versions: { "pages/home.tsx": "abc" },
+      origin: "agent",
+      actor: "agent-1",
+    };
+    expect(appliedTransactionSchema.parse(transaction).actor).toBe("agent-1");
+    expect(
+      docToShellSchema.parse({ kind: "transactionApplied", transaction }).kind,
+    ).toBe("transactionApplied");
+    expect(
+      appliedTransactionSchema.safeParse({ ...transaction, origin: "external" })
+        .success,
+    ).toBe(true);
+    expect(
+      appliedTransactionSchema.safeParse({ ...transaction, origin: "system" })
+        .success,
+    ).toBe(false);
+    expect(
+      appliedTransactionSchema.safeParse({ ...transaction, actor: "" }).success,
+    ).toBe(false);
+  });
+
   it("rejects unknown message kinds", () => {
     expect(shellToDocSchema.safeParse({ kind: "nope" }).success).toBe(false);
+  });
+});
+
+describe("agent transport envelopes", () => {
+  it("validates agent client messages", () => {
+    const shell = {
+      kind: "shell",
+      message: {
+        kind: "applyCommands",
+        commands: [{ kind: "createToken", name: "x", value: "#ffffff" }],
+        baseVersions: [],
+      },
+    };
+    expect(agentClientToHostSchema.parse(shell).kind).toBe("shell");
+    expect(
+      agentClientToHostSchema.parse({ kind: "initialize", client: "probe" })
+        .kind,
+    ).toBe("initialize");
+    expect(
+      agentClientToHostSchema.parse({
+        kind: "query",
+        id: "q1",
+        request: { type: "versions" },
+      }).kind,
+    ).toBe("query");
+    expect(
+      agentClientToHostSchema.parse({
+        kind: "query",
+        id: "q2",
+        request: {
+          type: "select",
+          targets: [{ file: "pages/home.tsx", path: [0, 0] }],
+        },
+      }).kind,
+    ).toBe("query");
+    expect(
+      agentClientToHostSchema.parse({
+        kind: "query",
+        id: "q3",
+        request: { type: "screenshot" },
+      }).kind,
+    ).toBe("query");
+    expect(
+      agentClientToHostSchema.parse({
+        kind: "query",
+        id: "q4",
+        request: {
+          type: "export",
+          request: {
+            file: "pages/home.tsx",
+            name: "home",
+            settings: [
+              {
+                id: "s1",
+                format: "png",
+                scale: { type: "scale", value: 2 },
+                suffix: "",
+              },
+            ],
+          },
+        },
+      }).kind,
+    ).toBe("query");
+    expect(
+      agentClientToHostSchema.parse({
+        kind: "activity",
+        targets: [{ file: "pages/home.tsx", path: [0, 0] }],
+      }).kind,
+    ).toBe("activity");
+    expect(
+      agentClientToHostSchema.safeParse({
+        kind: "shell",
+        message: { kind: "nope" },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("validates agent host messages", () => {
+    const session = { id: "s1", actor: "agent-1", color: "#ff6b6b" };
+    expect(agentSessionSchema.parse(session).actor).toBe("agent-1");
+    expect(
+      agentHostToClientSchema.parse({
+        kind: "connected",
+        session,
+        generation: 1,
+        projectOpen: true,
+      }).kind,
+    ).toBe("connected");
+    expect(
+      agentHostToClientSchema.parse({
+        kind: "projectClosed",
+        generation: 2,
+        reason: "switch",
+      }),
+    ).toHaveProperty("reason", "switch");
+    expect(
+      agentHostToClientSchema.parse({
+        kind: "doc",
+        message: {
+          kind: "transactionApplied",
+          transaction: {
+            id: "t1",
+            changedFiles: [],
+            versions: {},
+            origin: "agent",
+            actor: "agent-1",
+          },
+        },
+      }).kind,
+    ).toBe("doc");
+    expect(agentHostToClientSchema.safeParse({ kind: "nope" }).success).toBe(
+      false,
+    );
+  });
+
+  it("validates history snapshot entries", () => {
+    const entry = {
+      id: "h1",
+      actor: "agent-1",
+      stale: false,
+      createdAt: 1,
+      files: ["pages/home.tsx"],
+      before: { "pages/home.tsx": "old" },
+      after: { "pages/home.tsx": "new" },
+    };
+    expect(historySnapshotEntrySchema.parse(entry).actor).toBe("agent-1");
+    expect(
+      historySnapshotEntrySchema.safeParse({ ...entry, stale: "no" }).success,
+    ).toBe(false);
   });
 });
