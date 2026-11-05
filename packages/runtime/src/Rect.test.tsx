@@ -27,6 +27,8 @@ describe("Rect", () => {
     expect(div?.style.top).toBe("20px");
     expect(div?.style.width).toBe("120px");
     expect(div?.style.background).toBe("rgb(255, 0, 0)");
+    expect(div?.style.borderRadius).toBe("8px");
+    expect(div?.style.opacity).toBe("0.5");
   });
 });
 

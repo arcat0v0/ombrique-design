@@ -47,11 +47,19 @@ export function Rect({
         width,
         height,
         background: fill,
-        borderRadius: radius,
-        borderTopLeftRadius: radiusTopLeft,
-        borderTopRightRadius: radiusTopRight,
-        borderBottomRightRadius: radiusBottomRight,
-        borderBottomLeftRadius: radiusBottomLeft,
+        ...(radius !== undefined ? { borderRadius: radius } : {}),
+        ...(radiusTopLeft !== undefined
+          ? { borderTopLeftRadius: radiusTopLeft }
+          : {}),
+        ...(radiusTopRight !== undefined
+          ? { borderTopRightRadius: radiusTopRight }
+          : {}),
+        ...(radiusBottomRight !== undefined
+          ? { borderBottomRightRadius: radiusBottomRight }
+          : {}),
+        ...(radiusBottomLeft !== undefined
+          ? { borderBottomLeftRadius: radiusBottomLeft }
+          : {}),
         border:
           stroke === undefined
             ? undefined

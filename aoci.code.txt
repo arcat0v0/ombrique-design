@@ -188,7 +188,7 @@ Frame.tsx[DU6S]: F:Renders a positioned Frame container and forwards native HTML
 Group.tsx[DU3T]: F:Renders a named grouping div for organizing child elements | R:- | A:- | S:-
 Image.tsx[DU4T]: F:Renders an image element positioned in the canvas with object-fit styling | R:- | A:- | S:-
 Path.tsx[DU4T]: F:Renders an SVG element drawing path data with viewport-relative coordinates | R:- | A:- | S:-
-Rect.tsx[DU4T]: F:Renders an absolutely positioned rectangle element with fill and radius styling | R:- | A:- | S:-
+Rect.tsx[DU4T]: F:Renders an absolutely positioned rectangle element with fill, border, and radius styling | R:- | A:- | S:Only defined corner radii are emitted; setting undefined longhand corner radii alongside radius makes React drop border-radius
 Star.tsx[DU4T]: F:Renders a star polygon SVG generated from point count and radius math | R:- | A:- | S:-
 Text.tsx[DU4T]: F:Renders an absolutely positioned text element with typography styling | R:- | A:- | S:-
 Vector.tsx[DU4T]: F:Renders an SVG element with path data and vector network styling | R:- | A:- | S:-
@@ -230,19 +230,6 @@ renderer.js[AU5L]: F:Renders a grid of many artboard canvases to measure composi
 shader-probe.js[TQ3L]: F:Runs WebGPU and WebGL shader capture probes over DOM, GL, and two-canvas scenarios and writes structured results with fallback counters | R:- | A:- | S:Reports rafFallbacks and preloadCounts
 shader.html[EU3T]: F:Hosts the shader capture probe with a drawable canvas, HUD, and strict CSP | R:- | A:- | S:Loads shader-probe.js with mode query
 SHADER_PROBE_REPORT.md[SG4M]: F:Reports real Electron shader capture probe results, environment, scenarios, and the recommended host-canvas shader node layout | R:- | A:- | S:Documents 180 s watchdog and background switches
-
-===/home/arcat/Develop/ombrique/ombrique-design/2026-10-29T10-16-04-856Z_01a18728-ddf8-764e-9493-f1f71164b0b0/btw-history/===
-entry-15b97c5a7a58f038.json[SG3T]: F:Stores one completed user question and answer about commit and push status from the archived session | R:- | A:- | S:Commit not made; verification still pending
-entry-15b97cad0298f03a.json[SG3T]: F:Stores one completed user question and answer summarizing the finished editor refactor and git push preparation | R:- | A:- | S:Claims all work done; commit and push pending
-
-===/home/arcat/Develop/ombrique/ombrique-design/2026-10-29T10-16-04-856Z_01a18728-ddf8-764e-9493-f1f71164b0b0/===
-core-implementation.md[SG3T]: F:Records the core implementation run result with build artifacts, E2E assertion counts, lint cleanup, and gate outputs | R:- | A:- | S:Reports 60/60 E2E and 290/290 tests
-editor-core-implementation.jsonl[SG3T]: F:Records an archived core-implementation worker transcript with prompts, model metadata, and tool events | R:- | A:- | S:Early 429 errors precede any repo edits
-editor-ui-implementation.md[SG3T]: F:Records the editor-ui shadcn refactor commit result and clean git status | R:- | A:- | S:Names commit 6172e4ee on main
-implementation-audit.jsonl[SG3M]: F:Records the read-only implementation audit session transcript with prompts, reasoning, and tool execution events | R:- | A:- | S:Archived parent session 2026-10-29T10-16
-implementation-audit.md[SG3M]: F:Summarizes the read-only UI and architecture audit with verification baseline, control traces, and gap findings | R:- | A:- | S:E2E bypasses shell UI, yielding false green
-requirements-baseline.jsonl[SG3S]: F:Records the read-only requirements baseline session transcript with prompts, tool calls, and evidence readings | R:- | A:- | S:Archived parent session 2026-10-29T10-16
-requirements-baseline.md[SG3T]: F:Baselines Ombrique product requirements from Notion pages and README with acceptance criteria and documentation gaps | R:- | A:- | S:Flags Figma, Frame, and CDP spec gaps
 
 ===/home/arcat/Develop/ombrique/ombrique-design/packages/mcp/===
 package.json[FV4T]: F:Declares the @ombrique/mcp stdio shim package with MCP SDK, protocol, and zod dependencies | R:- | A:- | S:start runs tsx src/main.ts

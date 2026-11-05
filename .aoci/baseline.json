@@ -83,9 +83,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "d99a3138ec9416a23e0a16076563b5d765bbf804cd2f78490d97028ed8cb905b",
-      "size": 45205,
-      "normalized_sha256": "d99a3138ec9416a23e0a16076563b5d765bbf804cd2f78490d97028ed8cb905b"
+      "sha256": "40025cd7c661db8ee65706a5aa66e8d3687b5f495cad509a04a0407f39194178",
+      "size": 43307,
+      "normalized_sha256": "40025cd7c661db8ee65706a5aa66e8d3687b5f495cad509a04a0407f39194178"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -387,9 +387,9 @@
     },
     "example-project/pages/home.tsx": {
       "role": "index",
-      "sha256": "c2d12c1104bdf85e1d254952457ab4a4f760afd9760a7cfa8e1704d6a969e7a0",
-      "size": 3133,
-      "normalized_sha256": "c2d12c1104bdf85e1d254952457ab4a4f760afd9760a7cfa8e1704d6a969e7a0"
+      "sha256": "fe44cde772cd35bbc7d461db071f957a0c9d2d33429550092999c55c51130f69",
+      "size": 2905,
+      "normalized_sha256": "fe44cde772cd35bbc7d461db071f957a0c9d2d33429550092999c55c51130f69"
     },
     "example-project/pages/pricing.tsx": {
       "role": "index",
@@ -1413,15 +1413,15 @@
     },
     "packages/runtime/src/Rect.test.tsx": {
       "role": "observe",
-      "sha256": "b9e1f840f00fb51e4e5d404f603109498b7fd356a6f5c87b24add897bb7500c4",
-      "size": 1397,
-      "normalized_sha256": "b9e1f840f00fb51e4e5d404f603109498b7fd356a6f5c87b24add897bb7500c4"
+      "sha256": "24a501a3b514703a9add33c12a085a357c9c08b5aaffaff8dd6dae27398351f7",
+      "size": 1490,
+      "normalized_sha256": "24a501a3b514703a9add33c12a085a357c9c08b5aaffaff8dd6dae27398351f7"
     },
     "packages/runtime/src/Rect.tsx": {
       "role": "index",
-      "sha256": "5cefda6040e05327da1b83c2e95d92c6ec12015fe00b0f55e11b4d28f44b5f37",
-      "size": 1327,
-      "normalized_sha256": "5cefda6040e05327da1b83c2e95d92c6ec12015fe00b0f55e11b4d28f44b5f37"
+      "sha256": "797dca50acbe8f15ecf7a233620fb27f7e78e41f8c53101ca895f76685dd5b6f",
+      "size": 1628,
+      "normalized_sha256": "797dca50acbe8f15ecf7a233620fb27f7e78e41f8c53101ca895f76685dd5b6f"
     },
     "packages/runtime/src/Shader.test.tsx": {
       "role": "observe",

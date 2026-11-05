@@ -1,4 +1,4 @@
-import { Frame, Rect, Text, Ellipse } from "@ombrique/runtime";
+import { Frame, Rect, Text } from "@ombrique/runtime";
 
 export default function Home() {
   return (
@@ -12,17 +12,6 @@ export default function Home() {
       data-mode="light"
       data-density="regular"
     >
-      <Ellipse
-        data-name="ellipse"
-        fill="#d9d9d9"
-        style={{
-          position: "absolute",
-          left: 40,
-          top: 40,
-          width: 337,
-          height: 297,
-        }}
-      />
       <Text style={{ position: "absolute", left: 24, top: 24, width: 240 }}>
         Text
       </Text>
