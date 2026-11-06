@@ -40,7 +40,7 @@ shell.ts[EU6M]: F:Exposes the shell IPC bridge for project, document events, git
 
 ===/home/arcat/Develop/ombrique/ombrique-design/apps/desktop/src/shell/===
 App.tsx[EU6T]: F:Renders the top-level editor shell layout composing panels and the canvas view | R:code:apps/desktop/src/shell/state.ts | A:App | S:-
-index.html[EU2T]: F:HTML entry template for the shell renderer window | R:code:apps/desktop/src/shell/main.tsx | A:- | S:CSP permits same-origin fonts for bundled Inter
+index.html[EU2T]: F:HTML entry template for the shell renderer window | R:code:apps/desktop/src/shell/main.tsx | A:- | S:img-src 'self' data: is required for thumbnails
 main.tsx[EU4T]: F:Mounts the shell React application into the DOM | R:code:apps/desktop/src/shell/App.tsx | A:- | S:-
 state.ts[DU8L]: F:Manages shell state for the document model, selection, panels, git and edit history, undo state, and shortcut execution | R:code:apps/desktop/src/shell/App.tsx,code:apps/desktop/src/preload/shell.ts,code:packages/editor-ui/src/transaction-history.ts,code:packages/editor-ui/src/shortcuts.ts | A:- | S:editHistory refreshes on historyChanged, transactionApplied, and files snapshots; refreshes are single-flight with coalesced follow-ups and a generation guard that drops reads from before project switches; restoreEditHistory builds restoreVersion files from before snapshots and preserves deletion semantics
 
@@ -266,3 +266,16 @@ mesh-gradient.glsl[KU4T]: F:Implements the example mesh-gradient GLSL ES 3.00 fr
 
 ===/home/arcat/Develop/ombrique/ombrique-design/docs/superpowers/specs/===
 2026-11-05-editor-ui-redesign-design.md[SU3T]: F:Records the canvas-first editor redesign intent, alternatives, interaction state, visual direction, constraints, and acceptance checks | R:code:packages/editor-ui/src/Shell.tsx,code:apps/desktop/src/main/index.ts | A:- | S:-
+
+===/home/arcat/Develop/ombrique/ombrique-design/2026-10-29T10-16-04-856Z_01a18728-ddf8-764e-9493-f1f71164b0b0/btw-history/===
+entry-15b97c5a7a58f038.json[SV2T]: F:Archives one session Q&A record asking whether the redesign work was committed and pushed | R:- | A:- | S:-
+entry-15b97cad0298f03a.json[SG2T]: F:Archives one session Q&A record summarizing the completed desktop-shell work before commit and push | R:- | A:- | S:-
+
+===/home/arcat/Develop/ombrique/ombrique-design/2026-10-29T10-16-04-856Z_01a18728-ddf8-764e-9493-f1f71164b0b0/===
+core-implementation.md[SQ3T]: F:Records the 2026-10-29 implementation session report with build artifact sizes, E2E results, and lint fixes | R:- | A:- | S:Historical snapshot; build and E2E numbers stale
+editor-core-implementation.jsonl[ZZ2T]: F:Stores the 2026-10-29 editor-core agent session trace events as JSONL | R:- | A:- | S:-
+editor-ui-implementation.md[SV3T]: F:Records the git push result of the shadcn/ui desktop shell rewrite commit 6172e4ee | R:- | A:- | S:-
+implementation-audit.jsonl[ZZ2M]: F:Stores the 2026-10-29 implementation audit agent session trace events as JSONL | R:code:2026-10-29T10-16-04-856Z_01a18728-ddf8-764e-9493-f1f71164b0b0/implementation-audit.md | A:- | S:-
+implementation-audit.md[SQ4M]: F:Reports the read-only implementation audit of the pre-redesign editor covering shadcn gaps and control wiring | R:code:2026-10-29T10-16-04-856Z_01a18728-ddf8-764e-9493-f1f71164b0b0/implementation-audit.jsonl | A:- | S:Historical pre-redesign audit; its findings drove the redesign and may no longer describe current code
+requirements-baseline.jsonl[ZZ2S]: F:Stores the 2026-10-29 requirements baseline review agent session trace events as JSONL | R:code:2026-10-29T10-16-04-856Z_01a18728-ddf8-764e-9493-f1f71164b0b0/requirements-baseline.md | A:- | S:-
+requirements-baseline.md[SG4T]: F:Reports the product requirements baseline review against Notion docs and README with gap analysis | R:code:2026-10-29T10-16-04-856Z_01a18728-ddf8-764e-9493-f1f71164b0b0/requirements-baseline.jsonl | A:- | S:Historical review of the pre-redesign product requirements; not a living spec
